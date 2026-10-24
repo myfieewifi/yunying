@@ -73,6 +73,7 @@ fun HomeScreen(vm: MainViewModel = viewModel()) {
                         haze,
                         style = dev.chrisbanes.haze.HazeStyle(
                             backgroundColor = Color(0x990B0B0F),
+                            tints = emptyList(),   // 区分两个重载构造器（tint: HazeTint? ≠ tints: List）
                             blurRadius = 24.dp,
                         ),
                     )

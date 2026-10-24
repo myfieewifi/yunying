@@ -6,6 +6,7 @@ import android.view.TextureView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
@@ -50,8 +51,8 @@ class ExoPlayerEngine(private val context: Context) : PlayerEngine {
                 override fun onPlayerError(error: PlaybackException) {
                     listener.onError(error.message ?: "ExoPlayer 播放错误")
                 }
-                override fun onVideoSizeChanged(width: Int, height: Int, unappliedRotationDegrees: Int, pixelWidthHeightRatio: Float) {
-                    listener.onVideoSizeChanged(width, height)
+                override fun onVideoSizeChanged(videoSize: VideoSize) {
+                    listener.onVideoSizeChanged(videoSize.width, videoSize.height)
                 }
             })
         }

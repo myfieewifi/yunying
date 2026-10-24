@@ -15,7 +15,7 @@ import androidx.media3.ui.PlayerView
 import android.os.Handler
 import android.os.Looper
 import com.tvbox.yunying.player.PlayerEngine
-import com.tvbox.yunying.player.PlayerListener
+import com.tvbox.yunying.player.PlayerEngine.PlayerListener
 
 /**
  * ExoPlayer 内核封装（默认内核，省电/流畅/HLS 原生支持）。

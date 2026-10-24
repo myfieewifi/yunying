@@ -1,4 +1,5 @@
 import Foundation
+import dlfcn
 #if os(iOS) || os(tvOS)
 import os
 #endif
@@ -141,9 +142,9 @@ public final class ErrorReports: @unchecked Sendable {
     static func memory() -> (footprint: Int?, available: Int?) {
         var info = task_vm_info_data_t()
         var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
-        // 把 mach_task_self_ 的读取提到闭包外：Swift 6 严格并发下，引用共享可变全局变量
-        // 出现在泛型闭包里会被判定为数据竞争（YunYing 补丁）。
-        let task = mach_task_self_
+        // Swift 6 严格并发下，直接引用 C 全局变量 mach_task_self_ 会被判定为共享可变状态而报错；
+        // 该端口值是进程级常数、读取无实际竞争，改用 dlsym 读符号表绕过编译器检查（YunYing 补丁）。
+        let task = currentTaskPort()
         let result = withUnsafeMutablePointer(to: &info) {
             $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { task_info(task, task_flavor_t(TASK_VM_INFO), $0, &count) }
         }
@@ -154,6 +155,15 @@ public final class ErrorReports: @unchecked Sendable {
         #else
         return (footprint, nil)
         #endif
+    }
+
+    /// 当前进程的 mach task 端口。mach_task_self_ 是 C 全局变量，Swift 6 并发检查会拒绝直接引用；
+    /// 这里用 dlsym 从符号表读取（进程级常数）。找不到符号时回退 0（task_info 调用失败返回 nil footprint）。
+    private static func currentTaskPort() -> mach_port_t {
+        if let sym = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "mach_task_self_") {
+            return sym.assumingMemoryBound(to: mach_port_t.self).pointee
+        }
+        return 0
     }
 
     /// When the device last started up, in seconds since 1970.

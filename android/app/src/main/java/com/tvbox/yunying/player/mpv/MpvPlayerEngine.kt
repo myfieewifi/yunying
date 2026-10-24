@@ -8,7 +8,7 @@ import android.util.Log
 import android.view.Surface
 import android.view.TextureView
 import com.tvbox.yunying.player.PlayerEngine
-import com.tvbox.yunying.player.PlayerListener
+import com.tvbox.yunying.player.PlayerEngine.PlayerListener
 import java.lang.reflect.InvocationHandler
 import java.lang.reflect.Method
 import java.lang.reflect.Proxy
@@ -150,11 +150,11 @@ class MpvPlayerEngine(private val context: Context) : PlayerEngine {
     override fun attachSurface(textureView: TextureView) {
         this.textureView = textureView
         if (textureView.isAvailable) {
-            setupSurface(textureView.surfaceTexture ?: return)
+            setupSurface(textureView.surfaceTexture ?: return, textureView.width, textureView.height)
         } else {
             textureView.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                 override fun onSurfaceTextureAvailable(surfaceTexture: SurfaceTexture, w: Int, h: Int) {
-                    setupSurface(surfaceTexture)
+                    setupSurface(surfaceTexture, w, h)
                 }
                 override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {
                     try { invoke("setPropertyString", "android-surface-size", "${w}x$h") } catch (_: Throwable) {}
@@ -168,11 +168,11 @@ class MpvPlayerEngine(private val context: Context) : PlayerEngine {
         }
     }
 
-    private fun setupSurface(st: SurfaceTexture) {
+    private fun setupSurface(st: SurfaceTexture, w: Int, h: Int) {
         surface = Surface(st)
         try {
             invoke("attachSurface", surface)
-            invoke("setPropertyString", "android-surface-size", "${st.defaultBufferSize}x${st.defaultBufferSize}")
+            invoke("setPropertyString", "android-surface-size", "${w}x$h")
         } catch (e: Throwable) {
             Log.e(TAG, "attachSurface 失败", e)
         }

@@ -39,7 +39,7 @@ class PySpider(
         copyAssetToDirIfNeeded("spider/python/spider_base.py", File(hostDir, "spider_base.py"))
 
         // 把 hostDir 加入 sys.path
-        py.sys.get("path").callAttr("insert", 0, hostDir.absolutePath)
+        py.getModule("sys").get("path").callAttr("insert", 0, hostDir.absolutePath)
 
         // 用 host.initialize(script, ext) 方式启动（与映匣 host.py initialize() 等价）
         val host = py.getModule("host")

@@ -1,0 +1,4 @@
+[submodule "yingxia-src"]
+	path = yingxia-src
+	url = https://github.com/jo32/tvbox-silicon.git
+	shallow = true

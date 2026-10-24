@@ -1,0 +1,16 @@
+{
+  "spider": "",
+  "sites": [
+    {
+      "key": "demo-json",
+      "name": "示例JSON源",
+      "type": 1,
+      "api": "https://example.com/api.php/provide/vod/",
+      "searchable": 1,
+      "quickSearch": 0,
+      "filterable": 1
+    }
+  ],
+  "lives": [],
+  "flags": ["youku", "qiyi", "mgtv", "bilibili"]
+}

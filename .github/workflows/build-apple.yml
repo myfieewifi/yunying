@@ -1,0 +1,181 @@
+name: Build YunYing Apple (iOS/tvOS TrollStore + macOS)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['apple-patches/**', 'yingxia-src/**', '.github/workflows/build-apple.yml']
+    tags: ['v*']
+
+jobs:
+  prepare:
+    name: Checkout & Apply patches
+    runs-on: macos-14
+    outputs:
+      version: ${{ steps.version.outputs.v }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Clone yingxia-src if not submodule
+        run: |
+          if [ ! -d yingxia-src/Sources ]; then
+            git clone --depth=1 https://github.com/jo32/tvbox-silicon.git yingxia-src
+          fi
+
+      - name: Apply YunYing patches
+        run: |
+          chmod +x apple-patches/apply.sh apple-patches/Runtime/PythonHost/build-python-ios.sh
+          apple-patches/apply.sh
+
+      - name: Resolve version
+        id: version
+        run: echo "v=$(cd yingxia-src && grep -m1 'MARKETING_VERSION' project.yml | sed -E 's/.*:[[:space:]]*//' | tr -d ' ' || echo 1.0.0)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache source tree for downstream jobs
+        uses: actions/upload-artifact@v4
+        with:
+          name: yingxia-src-patched
+          path: yingxia-src/
+          retention-days: 1
+
+  build-ios-trollstore:
+    name: Build iOS IPA (TrollStore)
+    needs: prepare
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: yingxia-src-patched, path: yingxia-src }
+
+      - name: Install XcodeGen & Node & JDK
+        run: |
+          brew install xcodegen node maven openjdk@19 || true
+          brew link --overwrite openjdk@19 || true
+
+      - name: Set up Python runtime for iOS
+        run: |
+          cd yingxia-src
+          export JAVA_HOME="$(/usr/libexec/java_home -v 19 || true)"
+          Scripts/build-script-host.sh
+          Scripts/build-java-host.sh
+          Scripts/build-python-host.sh
+          Scripts/build-python-host-ios.sh   # 来自 YunYing 补丁
+
+      - name: Generate Xcode project
+        run: |
+          cd yingxia-src
+          xcodegen generate
+
+      - name: Build iOS (no code sign, for TrollStore)
+        run: |
+          cd yingxia-src
+          # 安装 ad-hoc 签名占位（TrollStore 安装时会覆盖为 ldid 伪签名）
+          xcodebuild -project TVBox.xcodeproj \
+                     -scheme TVBox-iOS \
+                     -configuration Release \
+                     -sdk iphoneos \
+                     -derivedDataPath build \
+                     CODE_SIGN_IDENTITY="" \
+                     CODE_SIGNING_REQUIRED=NO \
+                     CODE_SIGNING_ALLOWED=NO \
+                     ENABLE_BITCODE=NO \
+                     ARCHS="arm64" \
+                     ONLY_ACTIVE_ARCH=NO \
+                     build
+
+      - name: Package IPA (TrollStore)
+        run: |
+          cd yingxia-src
+          APP_PATH=$(find build/Build/Products -name "TVBox-iOS.app" -type d | head -1)
+          echo "App path: $APP_PATH"
+          IPA_DIR="Payload"
+          rm -rf $IPA_DIR *.ipa
+          mkdir -p $IPA_DIR
+          cp -R "$APP_PATH" $IPA_DIR/
+          # TrollStore 关键：get-task-allow 须为 true（默认 debug 是 true；Release 可能是 false，这里不重新 codesign 保持原样也可，
+          # TrollStore 会在安装时重签并自动加 get-task-allow）
+          zip -qr YunYing-iOS-${{ needs.prepare.outputs.version }}.ipa $IPA_DIR
+          ls -lh *.ipa
+
+      - name: Upload iOS IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: YunYing-iOS-TrollStore-${{ needs.prepare.outputs.version }}
+          path: yingxia-src/YunYing-iOS-*.ipa
+
+  build-tvos:
+    name: Build tvOS IPA (TrollStore)
+    needs: prepare
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: yingxia-src-patched, path: yingxia-src }
+      - name: Toolchain
+        run: brew install xcodegen node maven openjdk@19 && brew link --overwrite openjdk@19 || true
+      - name: Build runtime
+        run: |
+          cd yingxia-src
+          export JAVA_HOME="$(/usr/libexec/java_home -v 19 || true)"
+          Scripts/build-script-host.sh
+          Scripts/build-java-host.sh
+          Scripts/build-python-host.sh
+          Scripts/build-python-host-ios.sh
+          xcodegen generate
+      - name: Build tvOS
+        run: |
+          cd yingxia-src
+          xcodebuild -project TVBox.xcodeproj -scheme TVBox-tvOS -configuration Release -sdk appletvos \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
+            ARCHS="arm64" build
+      - name: Package IPA
+        run: |
+          cd yingxia-src
+          APP_PATH=$(find build/Build/Products -name "TVBox-tvOS.app" -type d | head -1)
+          rm -rf Payload && mkdir Payload
+          cp -R "$APP_PATH" Payload/
+          zip -qr YunYing-tvOS-${{ needs.prepare.outputs.version }}.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: YunYing-tvOS-TrollStore-${{ needs.prepare.outputs.version }}
+          path: yingxia-src/YunYing-tvOS-*.ipa
+
+  build-macos:
+    name: Build macOS DMG
+    needs: prepare
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: yingxia-src-patched, path: yingxia-src }
+      - name: Toolchain
+        run: brew install xcodegen node maven openjdk@19 uv && brew link --overwrite openjdk@19 || true
+      - name: Build runtime
+        run: |
+          cd yingxia-src
+          export JAVA_HOME="$(/usr/libexec/java_home -v 19 || true)"
+          Scripts/build-java-host.sh
+          Scripts/build-script-host.sh
+          Scripts/build-python-host.sh
+          xcodegen generate
+      - name: Build macOS (arm64 + x86_64)
+        run: |
+          cd yingxia-src
+          xcodebuild -project TVBox.xcodeproj -scheme TVBox-macOS -configuration Release \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
+            ARCHS="arm64 x86_64" build
+      - name: Package DMG
+        run: |
+          cd yingxia-src
+          APP_PATH=$(find build/Build/Products -name "TVBox-macOS.app" -type d | head -1)
+          DMG="YunYing-macOS-${{ needs.prepare.outputs.version }}.dmg"
+          hdiutil create -volname "YunYing" -srcfolder "$APP_PATH" -ov -format UDZO "$DMG"
+          ls -lh "$DMG"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: YunYing-macOS-${{ needs.prepare.outputs.version }}
+          path: yingxia-src/YunYing-macOS-*.dmg

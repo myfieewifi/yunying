@@ -1,0 +1,14 @@
+name: Build All (Android + iOS/tvOS TrollStore + macOS)
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+jobs:
+  trigger-android:
+    uses: ./.github/workflows/build-android.yml
+    secrets: inherit
+  trigger-apple:
+    uses: ./.github/workflows/build-apple.yml
+    secrets: inherit

@@ -58,6 +58,11 @@ jobs:
         run: |
           cd yingxia-src
           chmod +x Scripts/*.sh build-scripts/*.sh 2>/dev/null || true
+          # 安装 uv（build-python-host.sh 需要 uv 或 PYTHON_HOME，brew 安装不可靠）
+          if ! command -v uv >/dev/null 2>&1; then
+            curl -LsSf https://astral.sh/uv/install.sh | sh
+            export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+          fi
           # 官方 Node 发行包自带 LICENSE（brew 安装的 node 没有，build-script-host.sh 会校验）
           NODE_VER="20.19.5"
           curl -fsSL "https://nodejs.org/dist/v${NODE_VER}/node-v${NODE_VER}-darwin-arm64.tar.gz" -o /tmp/node-dist.tar.gz
@@ -126,6 +131,11 @@ jobs:
         run: |
           cd yingxia-src
           chmod +x Scripts/*.sh build-scripts/*.sh 2>/dev/null || true
+          # 安装 uv（build-python-host.sh 需要 uv 或 PYTHON_HOME，brew 安装不可靠）
+          if ! command -v uv >/dev/null 2>&1; then
+            curl -LsSf https://astral.sh/uv/install.sh | sh
+            export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+          fi
           # 官方 Node 发行包自带 LICENSE（brew 安装的 node 没有，build-script-host.sh 会校验）
           NODE_VER="20.19.5"
           curl -fsSL "https://nodejs.org/dist/v${NODE_VER}/node-v${NODE_VER}-darwin-arm64.tar.gz" -o /tmp/node-dist.tar.gz
@@ -171,6 +181,11 @@ jobs:
         run: |
           cd yingxia-src
           chmod +x Scripts/*.sh build-scripts/*.sh 2>/dev/null || true
+          # 安装 uv（build-python-host.sh 需要 uv 或 PYTHON_HOME，brew 安装不可靠）
+          if ! command -v uv >/dev/null 2>&1; then
+            curl -LsSf https://astral.sh/uv/install.sh | sh
+            export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+          fi
           # 官方 Node 发行包自带 LICENSE（brew 安装的 node 没有，build-script-host.sh 会校验）
           NODE_VER="20.19.5"
           curl -fsSL "https://nodejs.org/dist/v${NODE_VER}/node-v${NODE_VER}-darwin-arm64.tar.gz" -o /tmp/node-dist.tar.gz

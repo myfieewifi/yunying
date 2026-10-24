@@ -67,6 +67,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")           // 类似 SwiftUI 风格
+    implementation("com.google.android.material:material:1.12.0")   // View 版 M3（styles.xml 的 Theme.Material3.* 需要）
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.navigation:navigation-compose:2.7.7")
     implementation("androidx.tv:tv-foundation:1.0.0-alpha10")      // Android TV 遥控器支持（alpha12 不存在）

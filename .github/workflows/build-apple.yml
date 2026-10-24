@@ -51,8 +51,8 @@ jobs:
 
       - name: Install XcodeGen & Node & JDK
         run: |
-          brew install xcodegen node maven openjdk@19 || true
-          brew link --overwrite openjdk@19 || true
+          # openjdk@19 已从 Homebrew 移除，混在一起会让整条 brew install 失败（xcodegen 装不上）
+          brew install xcodegen node maven || true
 
       - name: Build runtime
         run: |
@@ -126,7 +126,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with: { name: yingxia-src-patched, path: yingxia-src }
       - name: Toolchain
-        run: brew install xcodegen node maven openjdk@19 && brew link --overwrite openjdk@19 || true
+        run: brew install xcodegen node maven || true
       - name: Build runtime
         run: |
           cd yingxia-src
@@ -176,7 +176,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with: { name: yingxia-src-patched, path: yingxia-src }
       - name: Toolchain
-        run: brew install xcodegen node maven openjdk@19 uv && brew link --overwrite openjdk@19 || true
+        run: brew install xcodegen node maven uv || true
       - name: Build runtime
         run: |
           cd yingxia-src

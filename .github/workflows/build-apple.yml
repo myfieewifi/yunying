@@ -48,6 +48,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with: { name: yingxia-src-patched, path: yingxia-src }
+      - name: Select newest Xcode
+        run: |
+          # xcodegen 生成的是新版项目格式（objectVersion 77），需要 Xcode 16+ 打开
+          XC=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          echo "Using $XC"
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
 
       - name: Install XcodeGen & Node & JDK
         run: |
@@ -125,6 +132,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with: { name: yingxia-src-patched, path: yingxia-src }
+      - name: Select newest Xcode
+        run: |
+          # xcodegen 生成的是新版项目格式（objectVersion 77），需要 Xcode 16+ 打开
+          XC=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          echo "Using $XC"
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
       - name: Toolchain
         run: brew install xcodegen node maven || true
       - name: Build runtime
@@ -175,6 +189,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with: { name: yingxia-src-patched, path: yingxia-src }
+      - name: Select newest Xcode
+        run: |
+          # xcodegen 生成的是新版项目格式（objectVersion 77），需要 Xcode 16+ 打开
+          XC=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          echo "Using $XC"
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
       - name: Toolchain
         run: brew install xcodegen node maven uv || true
       - name: Build runtime

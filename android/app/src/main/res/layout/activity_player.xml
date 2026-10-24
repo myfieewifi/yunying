@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@android:color/black">
@@ -9,8 +10,7 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:keepScreenOn="true"
-        android:resizeMode="fit"
+        app:resizeMode="fit"
         app:use_controller="true"
-        app:show_buffering="when_playing"
-        xmlns:app="http://schemas.android.com/apk/res-auto" />
+        app:show_buffering="when_playing" />
 </FrameLayout>

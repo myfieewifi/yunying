@@ -62,7 +62,44 @@ char *TVAppleRuntimeRequest(const char *resourcePath, const char *requestJSON) {
     return NULL;
 }
 ''')
-print('project.yml + AppleRuntime.m patched')
+
+def patch(rel, old, new):
+    p = src / rel
+    s = p.read_text()
+    if old not in s:
+        print(f'WARN: upstream drift in {rel}, pattern not found')
+        return
+    p.write_text(s.replace(old, new))
+
+# Xcode 26（OS 26 SDK）编译不了只有 OS 27 SDK 才有的 API，即使包在 #available 里：
+# VideoEnhancement 的插值上限查询改为统一走静态限值
+patch('App/VideoEnhancement.swift',
+      '''        if #available(macOS 27, iOS 27, tvOS 27, *) {
+            guard let side = VTLowLatencyFrameInterpolationConfiguration.maximumDimension(forSpatialScaleFactor: 1),
+                  let pixels = VTLowLatencyFrameInterpolationConfiguration.maximumPixelCount(forSpatialScaleFactor: 1) else { return false }
+            return max(width, height) <= side && width * height <= pixels
+        }
+''',
+      '        // OS 27 的大小查询 API 需要 OS 27 SDK；Xcode 26 编译不了，统一用 OS 26 静态限值（YunYing 补丁）\n')
+
+# Result(catching:) 是同步闭包构造器，async 调用改用显式 do/catch（YunYing 补丁）
+patch('App/LiveRoomsView.swift',
+      '                    group.addTask { await (platform, Result { try await LiveCatalog.search(platform, keyword: query) }) }',
+      '''                    group.addTask {
+                        do {
+                            let rooms = try await LiveCatalog.search(platform, keyword: query)
+                            return (platform, Result<[LiveRoom], Error>.success(rooms))
+                        } catch {
+                            return (platform, Result<[LiveRoom], Error>.failure(error))
+                        }
+                    }''')
+
+# tvOS 27 的 tabViewSidebarHeader 在 tvOS 26 SDK 不存在，直接返回自身（YunYing 补丁）
+patch('App/MusicTVPlayer.swift',
+      '        if #available(tvOS 27, *) { tabViewSidebarHeader { MusicSidebarNowPlaying() } } else { self }',
+      '        return self')
+
+print('project.yml + AppleRuntime.m + App sources patched')
 PY
 
 echo "▶ 补丁应用完成。"

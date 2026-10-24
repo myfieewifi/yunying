@@ -1,0 +1,12 @@
+# 保证脚本文件在 Linux CI 上可用
+* text=auto
+*.sh text eol=lf
+android/gradlew text eol=lf
+gradlew text eol=lf
+*.bat text eol=crlf
+*.jar binary
+*.png binary
+*.jpg binary
+*.gif binary
+*.webp binary
+*.aar binary

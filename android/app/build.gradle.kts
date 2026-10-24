@@ -86,16 +86,10 @@ dependencies {
     // JS 运行时: QuickJS-Android
     implementation("com.github.square1io:quickjs-android:1.2.0")
 
-    // mpv 内核（libmpv）——预编译 AAR，CI 脚本会从 mpv-android release 下载到此目录
-    // 若为本地开发，可手动下载放到 android/app/libs/ 下，文件名匹配 libmpv*.aar
-    val mpvAar = fileTree("libs") { include("libmpv*.aar") }
-    if (mpvAar.files.isNotEmpty()) {
-        implementation(files(*mpvAar.files.toTypedArray()))
-    } else {
-        // 兜底：在 GitHub 上发布的 mpv-android aar（兼容 arm64-v8a / armeabi-v7a / x86_64）
-        // 实际编译时会由 download-mpv.sh 在 CI 中拉取并放到 libs/
-        implementation("is.xyz.mpv:libmpv:2024-10-27@aar")
-    }
+    // mpv 内核（libmpv）——预编译 AAR，CI/本地手动下载放到 android/app/libs/ 下，文件名匹配 libmpv*.aar
+    // mpv-android 官方 Release 只发布 APK，没有稳定 AAR 坐标，因此不提供 Maven 兜底依赖；
+    // MpvPlayerEngine 为纯反射实现：没有 libmpv 时编译/打包不受影响，运行时优雅回退 ExoPlayer
+    implementation(fileTree("libs") { include("libmpv*.aar") })
 
     // HTML 解析（爬虫常用）
     implementation("org.jsoup:jsoup:1.17.2")

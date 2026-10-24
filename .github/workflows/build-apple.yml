@@ -54,14 +54,15 @@ jobs:
           brew install xcodegen node maven openjdk@19 || true
           brew link --overwrite openjdk@19 || true
 
-      - name: Set up Python runtime for iOS
+      - name: Build runtime
         run: |
           cd yingxia-src
+          chmod +x Scripts/*.sh build-scripts/*.sh 2>/dev/null || true
           export JAVA_HOME="$(/usr/libexec/java_home -v 19 || true)"
-          Scripts/build-script-host.sh
-          Scripts/build-java-host.sh
-          Scripts/build-python-host.sh
-          Scripts/build-python-host-ios.sh   # 来自 YunYing 补丁
+          bash Scripts/build-script-host.sh
+          bash Scripts/build-java-host.sh
+          bash Scripts/build-python-host.sh
+          bash Scripts/build-python-host-ios.sh   # 来自 YunYing 补丁
 
       - name: Generate Xcode project
         run: |
@@ -118,11 +119,12 @@ jobs:
       - name: Build runtime
         run: |
           cd yingxia-src
+          chmod +x Scripts/*.sh build-scripts/*.sh 2>/dev/null || true
           export JAVA_HOME="$(/usr/libexec/java_home -v 19 || true)"
-          Scripts/build-script-host.sh
-          Scripts/build-java-host.sh
-          Scripts/build-python-host.sh
-          Scripts/build-python-host-ios.sh
+          bash Scripts/build-script-host.sh
+          bash Scripts/build-java-host.sh
+          bash Scripts/build-python-host.sh
+          bash Scripts/build-python-host-ios.sh
           xcodegen generate
       - name: Build tvOS
         run: |
@@ -156,10 +158,11 @@ jobs:
       - name: Build runtime
         run: |
           cd yingxia-src
+          chmod +x Scripts/*.sh build-scripts/*.sh 2>/dev/null || true
           export JAVA_HOME="$(/usr/libexec/java_home -v 19 || true)"
-          Scripts/build-java-host.sh
-          Scripts/build-script-host.sh
-          Scripts/build-python-host.sh
+          bash Scripts/build-java-host.sh
+          bash Scripts/build-script-host.sh
+          bash Scripts/build-python-host.sh
           xcodegen generate
       - name: Build macOS (arm64 + x86_64)
         run: |

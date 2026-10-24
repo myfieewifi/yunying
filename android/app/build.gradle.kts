@@ -92,8 +92,8 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.3.1")
     implementation("androidx.media3:media3-datasource-okhttp:1.3.1")
 
-    // 网络: OkHttp + Retrofit
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // 网络: OkHttp + Retrofit（catvod 模块需要 okhttp 5.x API）
+    implementation("com.squareup.okhttp3:okhttp:5.5.0")
     implementation("com.squareup.retrofit2:retrofit:2.11.0")
     implementation("com.squareup.retrofit2:converter-gson:2.11.0")
     implementation("com.google.code.gson:gson:2.10.1")

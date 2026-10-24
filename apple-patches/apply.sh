@@ -102,4 +102,13 @@ patch('App/MusicTVPlayer.swift',
 print('project.yml + AppleRuntime.m + App sources patched')
 PY
 
+echo "▶ 应用 iOS 16 兼容转换（@Observable → ObservableObject + 垫片）..."
+# 映匣源码深绑 iOS 18 API，这里统一降级：
+#   部署目标 18 → 16；类模型全量转 ObservableObject；iOS17+ 视图 API 用
+#   @available(iOS16,*) 垫片顶替（可用性重载消歧，tvOS/macOS 继续走 SDK 原生）。
+if [ -d "$SRC/Sources/TVCore" ]; then
+  python3 "$PATCH/ios16.py" "$ROOT"
+  cp -v "$PATCH/ios16-shims.swift" "$SRC/App/_YunyingIOS16Shims.swift"
+fi
+
 echo "▶ 补丁应用完成。"

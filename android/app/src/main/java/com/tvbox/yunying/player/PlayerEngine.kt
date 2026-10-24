@@ -9,7 +9,7 @@ import android.view.TextureView
  */
 interface PlayerEngine {
 
-    fun interface PlayerListener {
+    interface PlayerListener {
         fun onPrepared() {}
         fun onCompletion() {}
         fun onError(msg: String) {}

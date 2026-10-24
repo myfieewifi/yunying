@@ -69,12 +69,13 @@ fun HomeScreen(vm: MainViewModel = viewModel()) {
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
                 modifier = Modifier
-                    .hazeChild(haze, style = androidx.compose.ui.graphics.TileMode.Clamp.let {
-                        dev.chrisbanes.haze.HazeStyle(
+                    .hazeChild(
+                        haze,
+                        style = dev.chrisbanes.haze.HazeStyle(
                             backgroundColor = Color(0x990B0B0F),
                             blurRadius = 24.dp,
-                        )
-                    })
+                        ),
+                    )
             )
         }
     ) { padding ->
@@ -208,8 +209,9 @@ private fun VodCard(vod: Vod) {
         )
         Spacer(Modifier.height(6.dp))
         Text(vod.vod_name, color = Color.White, maxLines = 1, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-        if (!vod.vod_remarks.isNullOrBlank()) {
-            Text(vod.vod_remarks, color = Color(0xFF9999AA), maxLines = 1, fontSize = 11.sp)
+        val remarks = vod.vod_remarks
+        if (!remarks.isNullOrBlank()) {
+            Text(remarks, color = Color(0xFF9999AA), maxLines = 1, fontSize = 11.sp)
         }
     }
 }

@@ -1,5 +1,5 @@
 import Foundation
-import dlfcn
+import Darwin
 #if os(iOS) || os(tvOS)
 import os
 #endif

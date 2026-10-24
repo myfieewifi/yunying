@@ -39,7 +39,7 @@ class PySpider(
         copyAssetToDirIfNeeded("spider/python/spider_base.py", File(hostDir, "spider_base.py"))
 
         // 把 hostDir 加入 sys.path
-        py.getModule("sys").get("path").callAttr("insert", 0, hostDir.absolutePath)
+        py.getModule("sys")?.get("path")?.callAttr("insert", 0, hostDir.absolutePath)
 
         // 用 host.initialize(script, ext) 方式启动（与映匣 host.py initialize() 等价）
         val host = py.getModule("host")
@@ -74,7 +74,8 @@ class PySpider(
     private fun callJson(method: String, vararg args: Any?): String? = runCatching {
         val inst = spiderInstance ?: return@runCatching null
         val result = inst.callAttr(method, *args)
-        when (val obj = result.toJava(Object::class.java)) {
+        val obj: Any = result.toJava(Object::class.java)
+        when (obj) {
             is String -> obj
             else -> gson.toJson(obj)
         }

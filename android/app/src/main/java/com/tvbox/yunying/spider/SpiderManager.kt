@@ -108,7 +108,7 @@ object SpiderManager {
         val req = Request.Builder().url(url).header("User-Agent", "Mozilla/5.0").build()
         http.newCall(req).execute().use { resp ->
             require(resp.isSuccessful) { "HTTP ${resp.code} $url" }
-            val bytes = resp.body.bytes()
+            val bytes = resp.body?.bytes() ?: ByteArray(0)
             cacheFile.writeBytes(bytes)
             return bytes
         }

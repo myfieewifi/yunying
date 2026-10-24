@@ -47,7 +47,7 @@ class JsSpider(
 
         val scriptUrl = if (isDrpy) {
             // drpy 走 ext 字段？还是 api 字段指向 js.md？—— 都可以
-            site.api.takeIf { it.isNotBlank() && !it.startsWith("csp_") } ?: site.ext.orEmpty()
+            site.api.takeIf { it.isNotBlank() && !it.startsWith("csp_") } ?: site.extString.orEmpty()
         } else {
             site.api
         }

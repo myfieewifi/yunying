@@ -30,6 +30,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val last = ConfigLoader.last(app)
             if (last != null) {
+                SpiderManager.setGlobalJar(last.spider)
                 _ui.value = _ui.value.copy(config = last)
                 if (last.sites.isNotEmpty()) loadHome(0)
             }
@@ -41,6 +42,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _ui.value = _ui.value.copy(loading = true, error = null)
             runCatching {
                 val cfg = ConfigLoader.load(getApplication(), url)
+                SpiderManager.clear()
+                SpiderManager.setGlobalJar(cfg.spider)
                 _ui.value = _ui.value.copy(config = cfg, configUrl = url, currentSiteIndex = 0, loading = false)
                 if (cfg.sites.isNotEmpty()) loadHome(0)
             }.onFailure {

@@ -24,24 +24,32 @@ data class Site(
     @JvmField var quickSearch: Int = 0,
     @JvmField var filterable: Int = 1,
     @JvmField var playerUrl: String? = null,
-    @JvmField var ext: String? = null,            // 爬虫初始化参数：json字符串/子配置地址/另一个 js.md 的路径
+    @JvmField var ext: Any? = null,                // 爬虫初始化参数：字符串(地址/json)，或对象/数组（csp_ 类常见 sub 配置）
     @JvmField var categories: String? = null,
     @JvmField var timeout: Int = 15,
 ) {
+    /** ext 的字符串形态：对象/数组重新序列化为 JSON 字符串，供 Java/JS/Jar 爬虫使用 */
+    val extString: String?
+        get() = when (val e = ext) {
+            null -> null
+            is String -> e
+            else -> runCatching { com.google.gson.Gson().toJson(e) }.getOrNull() ?: ext.toString()
+        }
+
     /** 爬虫类型：按 api 后缀判定 */
     val spiderType: SpiderType
         get() = when {
             api.endsWith(".js.md", ignoreCase = true)
                     || api.endsWith(".md", ignoreCase = true)
-                    || ext?.endsWith(".js.md", ignoreCase = true) == true
-                    || ext?.endsWith(".md", ignoreCase = true) == true -> SpiderType.DRPY
+                    || extString?.endsWith(".js.md", ignoreCase = true) == true
+                    || extString?.endsWith(".md", ignoreCase = true) == true -> SpiderType.DRPY
             api.endsWith(".js", ignoreCase = true)
-                    || ext?.endsWith(".js", ignoreCase = true) == true -> SpiderType.JS
+                    || extString?.endsWith(".js", ignoreCase = true) == true -> SpiderType.JS
             api.endsWith(".py", ignoreCase = true)
-                    || ext?.endsWith(".py", ignoreCase = true) == true -> SpiderType.PY
+                    || extString?.endsWith(".py", ignoreCase = true) == true -> SpiderType.PY
             api.startsWith("csp_", ignoreCase = true)
                     || api.endsWith(".jar", ignoreCase = true)
-                    || ext?.endsWith(".jar", ignoreCase = true) == true -> SpiderType.JAR
+                    || extString?.endsWith(".jar", ignoreCase = true) == true -> SpiderType.JAR
             else -> SpiderType.JSON
         }
 }

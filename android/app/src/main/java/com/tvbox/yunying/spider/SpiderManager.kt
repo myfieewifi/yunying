@@ -22,8 +22,17 @@ object SpiderManager {
     private lateinit var appContext: Context
     private val http = OkHttpClient.Builder().followRedirects(true).build()
     private val cache = ConcurrentHashMap<String, BaseSpider>()
+    private var globalJar: String? = null
 
-    fun init(ctx: Context) { appContext = ctx.applicationContext }
+    fun init(ctx: Context) {
+        appContext = ctx.applicationContext
+        CatJarRuntime.init(ctx)
+    }
+
+    /** 配置级的全局 spider jar（xxx.jar;md5;xxx 或 xxx.js/xxx.py），csp_ 站点加载时使用 */
+    fun setGlobalJar(jar: String?) {
+        globalJar = jar?.trim()?.takeIf { it.isNotBlank() }
+    }
 
     fun clear() {
         cache.values.forEach run@{ it.destroy() }
@@ -38,9 +47,14 @@ object SpiderManager {
             SpiderType.JS -> JsSpider(site, this::fetchScriptText)
             SpiderType.DRPY -> JsSpider(site, this::fetchDrpyScriptText, isDrpy = true)
             SpiderType.PY -> PySpider(site, this::fetchScriptBytes)
-            SpiderType.JAR -> JarSpider(site, this::fetchJarBytes)
+            SpiderType.JAR -> {
+                val jar = globalJar ?: site.extString?.takeIf { it.contains(".jar", true) }
+                val isCsp = site.api.startsWith("csp_", ignoreCase = true)
+                if (isCsp && jar != null) CatJarSpider(site, jar)
+                else JarSpider(site, this::fetchJarBytes)
+            }
         }
-        spider.init(site.ext ?: "")
+        spider.init(site.extString ?: "")
         cache[site.key] = spider
         return spider
     }

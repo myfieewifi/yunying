@@ -84,7 +84,12 @@ jobs:
           for PLATFORM in iphoneos appletvos; do
             OUT="$PWD/build/AppleRuntime/$PLATFORM"
             mkdir -p "$OUT/lib" "$OUT/Resources/lib/lib/security" "$OUT/Resources/lib/conf/security" "$OUT/Resources/JavaHost/lib"
-            clang -c -x c -o "$OUT/runtime-stub.o" /dev/null
+            # 按 iOS/tvOS triple 编译 stub，否则链接报 "built for 'macOS'"
+            case "$PLATFORM" in
+              iphoneos) TRIPLE="arm64-apple-ios" ;;
+              appletvos) TRIPLE="arm64-apple-tvos" ;;
+            esac
+            clang -c -x c -target "$TRIPLE" -o "$OUT/runtime-stub.o" /dev/null
             ar rcs "$OUT/lib/libTVAppleRuntime.a" "$OUT/runtime-stub.o"
           done
           bash Scripts/sync-apple-javahost.sh
@@ -172,7 +177,7 @@ jobs:
           for PLATFORM in appletvos; do
             OUT="$PWD/build/AppleRuntime/$PLATFORM"
             mkdir -p "$OUT/lib" "$OUT/Resources/lib/lib/security" "$OUT/Resources/lib/conf/security" "$OUT/Resources/JavaHost/lib"
-            clang -c -x c -o "$OUT/runtime-stub.o" /dev/null
+            clang -c -x c -target arm64-apple-tvos -o "$OUT/runtime-stub.o" /dev/null
             ar rcs "$OUT/lib/libTVAppleRuntime.a" "$OUT/runtime-stub.o"
           done
           bash Scripts/sync-apple-javahost.sh

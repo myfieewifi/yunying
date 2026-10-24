@@ -17,3 +17,5 @@ dependencyResolutionManagement {
 }
 rootProject.name = "YunYing-Android"
 include(":app")
+include(":catvod")
+include(":quickjs")

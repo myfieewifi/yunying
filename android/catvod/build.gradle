@@ -1,0 +1,36 @@
+// CatVod 宿主运行时模块（vendored from FongMi/TV @fongmi, GPL-3.0）
+// 提供 com.github.catvod.* 宿主类：spider jar 通过 DexClassLoader 以 app classloader
+// 为 parent 解析这些类（Spider 基类 / net.OkHttp / utils.Js / Runtime / Proxy 等）。
+plugins {
+    id 'com.android.library'
+}
+
+android {
+    namespace 'com.github.catvod.crawler'
+    compileSdk 35
+
+    defaultConfig {
+        minSdk 21
+    }
+
+    compileOptions {
+        coreLibraryDesugaringEnabled = true
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    api 'androidx.annotation:annotation:1.9.1'
+    implementation 'androidx.core:core:1.13.1'
+    implementation 'androidx.collection:collection:1.4.4'
+    implementation 'androidx.preference:preference:1.2.1'
+    implementation 'com.google.guava:guava:33.7.2-android'
+    implementation 'com.google.code.gson:gson:2.14.0'
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    implementation 'com.squareup.okhttp3:logging-interceptor:4.12.0'
+    implementation 'com.squareup.okhttp3:okhttp-dnsoverhttps:4.12.0'
+    implementation 'com.googlecode.juniversalchardet:juniversalchardet:1.0.3'
+    implementation 'com.orhanobut:logger:2.2.0'
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs_nio:2.1.5'
+}

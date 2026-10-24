@@ -1,0 +1,26 @@
+// QuickJS (fongmi quickjs-ng) SDK + 插件入口（vendored from FongMi/TV @fongmi, GPL-3.0）
+// 运行时插件（runtime-release）在映匣主程里就地打包：wrapper-java.jar 提供 com.fongmi.quickjs.* SDK，
+// jniLibs 提供 libquickjs-wrapper.so；RuntimeModule 补丁支持进程内加载外部插件。
+plugins {
+    id 'com.android.library'
+}
+
+android {
+    namespace 'com.fongmi.android.tv.quickjs'
+    compileSdk 35
+
+    defaultConfig {
+        minSdk 21
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'org.jsoup:jsoup:1.17.2'
+    compileOnly project(':catvod')   // 引用 Spider/QuickJsRuntime 类型；app 同时依赖两者，避免环
+    api files('libs/wrapper-java.jar')
+}

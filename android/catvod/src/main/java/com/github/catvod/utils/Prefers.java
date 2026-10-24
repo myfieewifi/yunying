@@ -73,18 +73,16 @@ public class Prefers {
     }
 
     public static void put(String key, Object obj) {
-        switch (obj) {
-            case String val -> getPrefers().edit().putString(key, val).apply();
-            case Boolean val -> getPrefers().edit().putBoolean(key, val).apply();
-            case Float val -> getPrefers().edit().putFloat(key, val).apply();
-            case Integer val -> getPrefers().edit().putInt(key, val).apply();
-            case Long val -> getPrefers().edit().putLong(key, val).apply();
-            case Number val -> {
-                if (val.toString().contains(".")) put(key, val.floatValue());
-                else put(key, val.intValue());
-            }
-            case null, default -> {
-            }
+        // YunYing 补丁：Java 17 禁用了 switch 模式匹配（preview），改写为 instanceof 链
+        if (obj instanceof String) getPrefers().edit().putString(key, (String) obj).apply();
+        else if (obj instanceof Boolean) getPrefers().edit().putBoolean(key, (Boolean) obj).apply();
+        else if (obj instanceof Float) getPrefers().edit().putFloat(key, (Float) obj).apply();
+        else if (obj instanceof Integer) getPrefers().edit().putInt(key, (Integer) obj).apply();
+        else if (obj instanceof Long) getPrefers().edit().putLong(key, (Long) obj).apply();
+        else if (obj instanceof Number) {
+            Number val = (Number) obj;
+            if (val.toString().contains(".")) put(key, val.floatValue());
+            else put(key, val.intValue());
         }
     }
 

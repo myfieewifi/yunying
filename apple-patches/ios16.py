@@ -165,6 +165,30 @@ def balanced_delete(text, name):
             i += 1
         text = text[:idx] + text[i:]
 
+
+def balanced_delete_brace(text, name):
+    """删除 `.name { ... }`（闭包参数修饰符），平衡大括号。"""
+    token = '.' + name + ' '
+    while True:
+        idx = text.find(token)
+        if idx < 0:
+            return text
+        brace = text.find('{', idx)
+        # 必须紧邻（ inspira：中间只能是空格/换行）
+        if brace < 0 or brace - idx > len(token) + 4:
+            return text
+        i, depth, n = brace, 0, len(text)
+        while i < n:
+            c = text[i]
+            if c == '{':
+                depth += 1
+            elif c == '}':
+                depth -= 1
+                if depth == 0:
+                    break
+            i += 1
+        text = text[:idx] + text[i + 1:]
+
 # ────────────────────────── 类转换 ──────────────────────────
 
 def convert_classes(lines):
@@ -320,6 +344,7 @@ def process_file(path):
     # 平衡删除
     for name in ('scrollIndicators', 'scrollTargetLayout', 'sensoryFeedback'):
         text = balanced_delete(text, name)
+    text = balanced_delete_brace(text, 'onScrollPhaseChange')
     # ContentUnavailableView → CUV（shim 自身文件除外）
     if 'Shims' not in path.name:
         text = text.replace('ContentUnavailableView', 'CUV')

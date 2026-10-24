@@ -281,3 +281,30 @@ extension View {
         modifier(YyVisibilityProbe(threshold: threshold, action: action))
     }
 }
+
+// MARK: - onGeometryChange(for:of:action:)（iOS 18 API）的 iOS 16 实现
+// 上游形态：`.onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }`
+// 只标注 iOS 16 可用：macOS(15+)/tvOS 构建域中不可用，SDK 原生命中。
+@available(iOS 16.0, *)
+private struct YyGeometryProbe<T: Equatable>: ViewModifier {
+    let transform: (GeometryProxy) -> T
+    let action: (T) -> Void
+
+    func body(content: Content) -> some View {
+        content.background {
+            GeometryReader { g in
+                Color.clear
+                    .onAppear { action(transform(g)) }
+                    .onChange(of: transform(g), perform: action)
+            }
+        }
+    }
+}
+
+extension View {
+    @available(iOS 16.0, *)
+    func onGeometryChange<T: Equatable>(for type: T.Type, of transform: @escaping (GeometryProxy) -> T,
+                                        action: @escaping (T) -> Void) -> some View {
+        modifier(YyGeometryProbe(transform: transform, action: action))
+    }
+}

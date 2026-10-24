@@ -41,8 +41,9 @@ public enum DrpyParser {
         } else {
             // 按出现顺序拼接所有 js/javascript 代码块
             body = blocks
-                .filter { lang in
-                    guard let lang = lang?.lowercased() else { return true } // 无语言标注也视为 JS（drpy2 常见）
+                .filter { block in
+                    let lang = block.lang?.lowercased() ?? ""
+                    // 无语言标注也视为 JS（drpy2 常见），非 js/javascript 的代码块剔除
                     return lang == "js" || lang == "javascript" || lang.isEmpty
                 }
                 .map { $0.content }

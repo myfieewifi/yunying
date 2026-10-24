@@ -101,24 +101,31 @@ public final class IOSPythonHost: @unchecked Sendable {
     // MARK: - Helpers
 
     private func unzip(at source: URL, to destination: URL) {
+        #if os(macOS)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
         process.arguments = ["-q", "-o", source.path, "-d", destination.path]
         try? process.run()
         process.waitUntilExit()
+        #else
+        // iOS/tvOS 不能启动子进程（Process 在 iOS/tvOS 上不可用）；
+        // 运行时资源解压属于占位逻辑（bootstrapPythonRuntime 目前也是占位），留待链接 Python SAPI 后以纯 Swift 实现。
+        #endif
     }
 }
 
-// MARK: - PluginProcess 扩展：iOS/tvOS 自动选择 Python 宿主
+// MARK: - Python 宿主工厂：iOS/tvOS 自动选择 Python 宿主
 
-public extension PluginProcess {
+/// 注意：PluginProcess 在 TVCore 内是 internal，不能用 public extension 扩展它；
+/// 这里用独立工厂类型返回调用方需要的宿主对象。
+public enum PythonHostFactory {
     /// 在 iOS/tvOS 上跑 .py spider 时返回 IOSPythonHost 而非本地子进程。
-    /// 需要在 TVCore 里把原来 `spawn host.py` 的分支替换为对 IOSPythonHost.shared 的调用。
-    static func makePythonHost() -> Any {
+    /// 需要在 TVCore 里把原来 `spawn host.py` 的分支替换为对 PythonHostFactory.makePythonHost() 的调用。
+    public static func makePythonHost() -> Any {
         #if os(iOS) || os(tvOS)
         return IOSPythonHost.shared
         #else
-        return PluginProcess()  // macOS 沿用子进程模型
+        return PluginProcess()  // macOS 沿用子进程模型（同模块 internal 访问合法）
         #endif
     }
 }

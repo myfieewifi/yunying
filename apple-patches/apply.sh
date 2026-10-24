@@ -18,6 +18,9 @@ else
   mkdir -p "$SRC/Sources/TVCore/Player"
   [ -f "$PATCH/Sources/TVCore/DrpyParser.swift" ] && cp -v "$PATCH/Sources/TVCore/DrpyParser.swift"       "$SRC/Sources/TVCore/DrpyParser.swift" || true
   [ -f "$PATCH/Sources/TVCore/IOSPythonHost.swift" ] && cp -v "$PATCH/Sources/TVCore/IOSPythonHost.swift"    "$SRC/Sources/TVCore/IOSPythonHost.swift" || true
+  # 覆盖上游文件（修复新 Xcode/Swift 6 下的编译错误）
+  [ -f "$PATCH/Sources/TVCore/ErrorReports.swift" ] && cp -v "$PATCH/Sources/TVCore/ErrorReports.swift"     "$SRC/Sources/TVCore/ErrorReports.swift" || true
+  [ -f "$PATCH/Sources/TVCore/BilibiliCast.swift" ] && cp -v "$PATCH/Sources/TVCore/BilibiliCast.swift"     "$SRC/Sources/TVCore/BilibiliCast.swift" || true
   [ -f "$PATCH/Sources/TVCore/Player/MPVPlayerEngine.swift" ] && cp -v "$PATCH/Sources/TVCore/Player/MPVPlayerEngine.swift" "$SRC/Sources/TVCore/Player/MPVPlayerEngine.swift" || true
 fi
 

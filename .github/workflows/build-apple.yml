@@ -58,6 +58,12 @@ jobs:
         run: |
           cd yingxia-src
           chmod +x Scripts/*.sh build-scripts/*.sh 2>/dev/null || true
+          # 官方 Node 发行包自带 LICENSE（brew 安装的 node 没有，build-script-host.sh 会校验）
+          NODE_VER="20.19.5"
+          curl -fsSL "https://nodejs.org/dist/v${NODE_VER}/node-v${NODE_VER}-darwin-arm64.tar.gz" -o /tmp/node-dist.tar.gz
+          mkdir -p /tmp/node-dist && tar xzf /tmp/node-dist.tar.gz -C /tmp/node-dist --strip-components=1
+          export NODE_BIN="/tmp/node-dist/bin/node"
+          export NODE_LICENSE="/tmp/node-dist/LICENSE"
           export JAVA_HOME="$(/usr/libexec/java_home -v 19 || true)"
           bash Scripts/build-script-host.sh
           bash Scripts/build-java-host.sh
@@ -120,6 +126,12 @@ jobs:
         run: |
           cd yingxia-src
           chmod +x Scripts/*.sh build-scripts/*.sh 2>/dev/null || true
+          # 官方 Node 发行包自带 LICENSE（brew 安装的 node 没有，build-script-host.sh 会校验）
+          NODE_VER="20.19.5"
+          curl -fsSL "https://nodejs.org/dist/v${NODE_VER}/node-v${NODE_VER}-darwin-arm64.tar.gz" -o /tmp/node-dist.tar.gz
+          mkdir -p /tmp/node-dist && tar xzf /tmp/node-dist.tar.gz -C /tmp/node-dist --strip-components=1
+          export NODE_BIN="/tmp/node-dist/bin/node"
+          export NODE_LICENSE="/tmp/node-dist/LICENSE"
           export JAVA_HOME="$(/usr/libexec/java_home -v 19 || true)"
           bash Scripts/build-script-host.sh
           bash Scripts/build-java-host.sh
@@ -159,6 +171,12 @@ jobs:
         run: |
           cd yingxia-src
           chmod +x Scripts/*.sh build-scripts/*.sh 2>/dev/null || true
+          # 官方 Node 发行包自带 LICENSE（brew 安装的 node 没有，build-script-host.sh 会校验）
+          NODE_VER="20.19.5"
+          curl -fsSL "https://nodejs.org/dist/v${NODE_VER}/node-v${NODE_VER}-darwin-arm64.tar.gz" -o /tmp/node-dist.tar.gz
+          mkdir -p /tmp/node-dist && tar xzf /tmp/node-dist.tar.gz -C /tmp/node-dist --strip-components=1
+          export NODE_BIN="/tmp/node-dist/bin/node"
+          export NODE_LICENSE="/tmp/node-dist/LICENSE"
           export JAVA_HOME="$(/usr/libexec/java_home -v 19 || true)"
           bash Scripts/build-java-host.sh
           bash Scripts/build-script-host.sh

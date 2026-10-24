@@ -57,8 +57,7 @@ android {
 }
 
 dependencies {
-    // Chaquopy Python 运行时（与顶层插件版本一致）
-    implementation("com.chaquo.python:android:15.0.1")
+    // Chaquopy 运行时由插件自动注入（com.chaquo.python:android 坐标在其他仓库均不存在，勿手动添加）
 
     // AndroidX + Compose
     implementation("androidx.core:core-ktx:1.13.1")
@@ -70,8 +69,8 @@ dependencies {
     implementation("androidx.compose.material3:material3")           // 类似 SwiftUI 风格
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.navigation:navigation-compose:2.7.7")
-    implementation("androidx.tv:tv-foundation:1.0.0-alpha12")        // Android TV 遥控器支持
-    implementation("androidx.tv:tv-material:1.0.0-alpha12")
+    implementation("androidx.tv:tv-foundation:1.0.0-alpha10")      // Android TV 遥控器支持（alpha12 不存在）
+    implementation("androidx.tv:tv-material:1.0.0-alpha10")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.3")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.3")
 
@@ -87,8 +86,8 @@ dependencies {
     implementation("com.squareup.retrofit2:converter-gson:2.11.0")
     implementation("com.google.code.gson:gson:2.10.1")
 
-    // JS 运行时: QuickJS-Android
-    implementation("com.github.square1io:quickjs-android:1.2.0")
+    // JS 运行时: QuickJS-Android（taoweiji/quickjs-android，square1io 的 jitpack 坐标不存在）
+    implementation("io.github.taoweiji.quickjs:quickjs-android:1.4.6")
 
     // mpv 内核（libmpv）——预编译 AAR，CI/本地手动下载放到 android/app/libs/ 下，文件名匹配 libmpv*.aar
     // mpv-android 官方 Release 只发布 APK，没有稳定 AAR 坐标，因此不提供 Maven 兜底依赖；
@@ -101,8 +100,8 @@ dependencies {
     // 图片加载（海报）
     implementation("io.coil-kt:coil-compose:2.6.0")
 
-    // 毛玻璃（对齐映匣 GlassKit）
-    implementation("com.github.chrisbanes.haze:haze:0.9.0")
+    // 毛玻璃（对齐映匣 GlassKit；haze 没有发布 0.9.0 正式版，API 最接近的是 0.9.0-rc03）
+    implementation("dev.chrisbanes.haze:haze:0.9.0-rc03")
 
     // 本地偏好 / JSON 配置
     implementation("androidx.datastore:datastore-preferences:1.1.1")

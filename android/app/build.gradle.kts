@@ -17,14 +17,16 @@ android {
         ndk {
             abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86_64")
         }
-        // Chaquopy: 配置 Python
-        python {
-            pip {
-                install("requests")
-                install("urllib3")
-                install("certifi")
-                install("charset-normalizer")
-                install("idna")
+        // Chaquopy: 配置 Python（Chaquopy 15 DSL：defaultConfig.python 已改为 chaquopy）
+        chaquopy {
+            defaultConfig {
+                pip {
+                    install("requests")
+                    install("urllib3")
+                    install("certifi")
+                    install("charset-normalizer")
+                    install("idna")
+                }
             }
         }
     }
@@ -46,8 +48,7 @@ android {
 
     sourceSets {
         getByName("main") {
-            // Python 源码（爬虫宿主 + base/spider.py，从映匣 PythonHost 复用）
-            python.srcDir("src/main/python")
+            // Chaquopy 自动拾取 src/main/python/ 目录；这里只配置其余资源
             // QuickJS + JAR(Dex) 运行时放置
             jniLibs.srcDir("src/main/jniLibs")
             assets.srcDirs("src/main/assets")
@@ -56,6 +57,9 @@ android {
 }
 
 dependencies {
+    // Chaquopy Python 运行时（与顶层插件版本一致）
+    implementation("com.chaquo.python:android:15.0.1")
+
     // AndroidX + Compose
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.activity:activity-compose:1.9.1")

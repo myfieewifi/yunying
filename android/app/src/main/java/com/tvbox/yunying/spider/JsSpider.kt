@@ -37,13 +37,11 @@ class JsSpider(
         console.registerJavaMethod(JavaVoidCallback { _, args -> logArgs(args, android.util.Log.ERROR) }, "error")
         ctx.set("console", console)
 
-        // 注入 request()/http()/fetch() 占位
-        ctx.executeVoidScript(
-            "var request = function(url, opts){ console.log('req', url); return ''; };\n" +
-                "var http = request;\n" +
-                "var fetch = request;",
-            "yunying-boot.js"
-        )
+        // 注入 request()/http()/fetch() —— SpiderHttp 桥（okhttp + 编码探测 + gzip 解压）
+        val global = ctx.getGlobalObject()
+        global.registerJavaMethod(SpiderHttp.requestCallback, "request")
+        global.registerJavaMethod(SpiderHttp.httpCallback, "http")
+        global.registerJavaMethod(SpiderHttp.fetchCallback, "fetch")
 
         val scriptUrl = if (isDrpy) {
             // drpy 走 ext 字段？还是 api 字段指向 js.md？—— 都可以

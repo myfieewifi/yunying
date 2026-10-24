@@ -116,6 +116,9 @@ dependencies {
     // desugar（catvod 模块要求）
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.1.5")
 
+    // JS 爬虫 HTTP 桥的编码探测（GBK 源站）
+    implementation("com.googlecode.juniversalchardet:juniversalchardet:1.0.3")
+
     // 图片加载（海报）
     implementation("io.coil-kt:coil-compose:2.6.0")
 

@@ -129,6 +129,17 @@ extension View {
     func onChange<V: Equatable>(of value: V, initial: Bool = false, _ action: @escaping (V, V) async -> Void) -> some View {
         modifier(YyOnChangeAsync(value: value, initial: initial, action: action))
     }
+
+    /// 零参数闭包形态（iOS 17 独占）：`onChange(of: x, initial: true) { ... }`
+    @available(iOS 16.0, *)
+    func onChange<V: Equatable>(of value: V, initial: Bool = false, _ action: @escaping () -> Void) -> some View {
+        modifier(YyOnChangeSync(value: value, initial: initial, action: { _, _ in action() }))
+    }
+
+    @available(iOS 16.0, *)
+    func onChange<V: Equatable>(of value: V, initial: Bool = false, _ action: @escaping () async -> Void) -> some View {
+        modifier(YyOnChangeAsync(value: value, initial: initial, action: { _, _ in await action() }))
+    }
 }
 
 // MARK: - withAnimation(_:completion:_:)（iOS 17 动画完成回调）的近似实现

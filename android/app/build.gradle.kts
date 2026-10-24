@@ -35,6 +35,9 @@ android {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // CI 分发的 release APK 必须有签名，否则手机侧载时报“解析包时出错”。
+            // 没有正式签名密钥时用 debug 签名（本地 keystore，任何机器可用，安装无碍）。
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 

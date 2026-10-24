@@ -10,7 +10,7 @@ on:
 jobs:
   prepare:
     name: Checkout & Apply patches
-    runs-on: macos-14
+    runs-on: macos-26
     outputs:
       version: ${{ steps.version.outputs.v }}
     steps:
@@ -43,7 +43,7 @@ jobs:
   build-ios-trollstore:
     name: Build iOS IPA (TrollStore)
     needs: prepare
-    runs-on: macos-14
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -76,9 +76,18 @@ jobs:
           mkdir -p /tmp/node-dist && tar xzf /tmp/node-dist.tar.gz -C /tmp/node-dist --strip-components=1
           export NODE_BIN="/tmp/node-dist/bin/node"
           export NODE_LICENSE="/tmp/node-dist/LICENSE"
-          export JAVA_HOME="$(/usr/libexec/java_home -v 19 || true)"
+          export JAVA_HOME="$(/usr/libexec/java_home -v 21 || /usr/libexec/java_home -v 17)"
           bash Scripts/build-script-host.sh
           bash Scripts/build-java-host.sh
+          # 原生 AppleRuntime（OpenJDK-mobile 交叉编译）不在 CI 范围：放占位静态库 + 资源目录，
+          # project.yml 的 postBuild 脚本依赖这些文件存在（apply.sh 已放宽其校验为警告）
+          for PLATFORM in iphoneos appletvos; do
+            OUT="$PWD/build/AppleRuntime/$PLATFORM"
+            mkdir -p "$OUT/lib" "$OUT/Resources/lib/lib/security" "$OUT/Resources/lib/conf/security" "$OUT/Resources/JavaHost/lib"
+            clang -c -x c -o "$OUT/runtime-stub.o" /dev/null
+            ar rcs "$OUT/lib/libTVAppleRuntime.a" "$OUT/runtime-stub.o"
+          done
+          bash Scripts/sync-apple-javahost.sh
           bash Scripts/build-python-host.sh
           bash Scripts/build-python-host-ios.sh   # 来自 YunYing 补丁
 
@@ -127,7 +136,7 @@ jobs:
   build-tvos:
     name: Build tvOS IPA (TrollStore)
     needs: prepare
-    runs-on: macos-14
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -156,9 +165,17 @@ jobs:
           mkdir -p /tmp/node-dist && tar xzf /tmp/node-dist.tar.gz -C /tmp/node-dist --strip-components=1
           export NODE_BIN="/tmp/node-dist/bin/node"
           export NODE_LICENSE="/tmp/node-dist/LICENSE"
-          export JAVA_HOME="$(/usr/libexec/java_home -v 19 || true)"
+          export JAVA_HOME="$(/usr/libexec/java_home -v 21 || /usr/libexec/java_home -v 17)"
           bash Scripts/build-script-host.sh
           bash Scripts/build-java-host.sh
+          # 原生 AppleRuntime（OpenJDK-mobile 交叉编译）不在 CI 范围：放占位静态库 + 资源目录
+          for PLATFORM in appletvos; do
+            OUT="$PWD/build/AppleRuntime/$PLATFORM"
+            mkdir -p "$OUT/lib" "$OUT/Resources/lib/lib/security" "$OUT/Resources/lib/conf/security" "$OUT/Resources/JavaHost/lib"
+            clang -c -x c -o "$OUT/runtime-stub.o" /dev/null
+            ar rcs "$OUT/lib/libTVAppleRuntime.a" "$OUT/runtime-stub.o"
+          done
+          bash Scripts/sync-apple-javahost.sh
           bash Scripts/build-python-host.sh
           bash Scripts/build-python-host-ios.sh
           xcodegen generate
@@ -184,7 +201,7 @@ jobs:
   build-macos:
     name: Build macOS DMG
     needs: prepare
-    runs-on: macos-14
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -213,8 +230,15 @@ jobs:
           mkdir -p /tmp/node-dist && tar xzf /tmp/node-dist.tar.gz -C /tmp/node-dist --strip-components=1
           export NODE_BIN="/tmp/node-dist/bin/node"
           export NODE_LICENSE="/tmp/node-dist/LICENSE"
-          export JAVA_HOME="$(/usr/libexec/java_home -v 19 || true)"
+          export JAVA_HOME="$(/usr/libexec/java_home -v 21 || /usr/libexec/java_home -v 17)"
           bash Scripts/build-java-host.sh
+          # 诊断：macOS Xcode preBuild 的 host.jar 校验上轮报 unknown，打印产物实况
+          echo "--- JavaHost diagnostics ---"
+          echo "JAVA_HOME=${JAVA_HOME:-<empty>}"
+          java -version 2>&1 | head -2 || true
+          ls -la build/JavaHost/ 2>/dev/null | head -8 || true
+          unzip -l build/JavaHost/host.jar 2>&1 | head -6 || true
+          bash Scripts/check-java-host.sh build/JavaHost/host.jar 2>&1 | tail -3 || true
           bash Scripts/build-script-host.sh
           bash Scripts/build-python-host.sh
           xcodegen generate

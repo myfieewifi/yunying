@@ -311,7 +311,10 @@ def annotate_published(lines, decl, end):
             continue
         clause = head.strip()
         after = clause.split('var', 1)[1] if 'var' in clause else ''
-        if '{' in after and 'didSet' not in after and 'willSet' not in after and '=' not in after:
+        # 计算属性判定：'{' 出现在任何 '=' 之前（'=' 在 body 里的 == 不算赋值）
+        pos_brace = after.find('{')
+        pos_eq = after.find('=')
+        if pos_brace != -1 and (pos_eq == -1 or pos_eq > pos_brace) and 'didSet' not in after and 'willSet' not in after:
             # 声明行只有 { 的可能是存储属性+observers（didSet/willSet 在后面几行）：向前看
             ok = False
             for look in range(xx + 1, min(xx + 8, end)):

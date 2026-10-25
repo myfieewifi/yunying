@@ -6,9 +6,9 @@ plugins {
 
 android {
     namespace = "com.tvbox.yunying"
-    // okhttp-android 5.5.0 的 AAR 元数据硬性要求 compileSdk ≥ 37（vendored catvod/quickjs 也要 5.x API）；
-    // targetSdk 保持 34，不主动引入新运行时行为
-    compileSdk = 37
+    // okhttp-android 5.x 各版元数据差异大：5.5.0 要求 37、5.4.0 要求 36、5.2.1 及以下无要求。
+    // runner 预装 SDK 装不到 android-37，故 okhttp 全线钉 5.2.1，compileSdk 维持 34
+    compileSdk = 34
 
     defaultConfig {
         applicationId = "com.tvbox.yunying"
@@ -95,7 +95,7 @@ dependencies {
     implementation("androidx.media3:media3-datasource-okhttp:1.3.1")
 
     // 网络: OkHttp + Retrofit（catvod 模块需要 okhttp 5.x API）
-    implementation("com.squareup.okhttp3:okhttp:5.5.0")
+    implementation("com.squareup.okhttp3:okhttp:5.2.1")
     implementation("com.squareup.retrofit2:retrofit:2.11.0")
     implementation("com.squareup.retrofit2:converter-gson:2.11.0")
     implementation("com.google.code.gson:gson:2.10.1")

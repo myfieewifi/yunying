@@ -14,6 +14,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyGridState
@@ -78,7 +79,7 @@ class MainActivity : ComponentActivity() {
     }
 
     /** 文件读取/编辑权限：在线 jar 包与订阅配置需要落盘手机存储（仅首次启动自动弹一次） */
-    private fun requestStoragePermission() {
+    fun requestStoragePermission() {
         val prefs = getSharedPreferences("yunying", Context.MODE_PRIVATE)
         if (prefs.getBoolean("storage_asked", false)) return
         prefs.edit().putBoolean("storage_asked", true).apply()
@@ -718,8 +719,9 @@ private fun VodCard(vod: Vod, onClick: () -> Unit) {
             maxLines = 1, overflow = TextOverflow.Ellipsis,
             fontSize = 13.sp, fontWeight = FontWeight.Medium,
         )
-        if (!vod.vod_remarks.isNullOrBlank()) {
-            Text(vod.vod_remarks, color = YunYingColors.TextTertiary, maxLines = 1, fontSize = 11.sp)
+        val remarks = vod.vod_remarks
+        if (!remarks.isNullOrBlank()) {
+            Text(remarks, color = YunYingColors.TextTertiary, maxLines = 1, fontSize = 11.sp)
         }
     }
 }

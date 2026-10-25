@@ -108,15 +108,15 @@ def patch_class(data, lambda_name):
     # 追加常量：Utf8 "a"、NameAndType、Methodref
     utf8_a = struct.pack('>BH', 1, 1) + b'a'
     idx_a = count
-    nat = struct.pack('>BHH', 12, idx_a, desc_idx)
+    nat = struct.pack('>BHH', 12, idx_lambda, desc_idx)  # 名字指向原 lambda 方法
     idx_nat = count + 1
     mref = struct.pack('>BHH', 10, this_class, idx_nat)
     idx_mref = count + 2
     new_pool = utf8_a + nat + mref
     new_count = count + 3
 
-    # 桥接方法字节码：aload_0..aload_{k-1}, invokestatic, areturn
-    code = bytes([0x2B + j for j in range(k)]) + b'\xb8' + struct.pack('>H', idx_mref) + b'\xb0'
+    # 桥接方法字节码：aload_0..aload_{k-1}（0x2A 起）, invokestatic, areturn
+    code = bytes([0x2A + j for j in range(k)]) + b'\xb8' + struct.pack('>H', idx_mref) + b'\xb0'
     code_attr = struct.pack('>HH', 3, k) + struct.pack('>I', len(code)) + code + struct.pack('>HH', 0, 0)
     code_attr = struct.pack('>H', idx_code) + struct.pack('>I', len(code_attr)) + code_attr
     method_info = struct.pack('>HHHH', 0x0009, idx_a, desc_idx, 1) + code_attr

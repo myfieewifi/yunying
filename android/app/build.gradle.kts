@@ -119,7 +119,10 @@ dependencies {
     //  - wrapper-android：配套原生 libquickjs-android-wrapper.so（与 vendored :quickjs 的 libquickjs-wrapper.so 不冲突）
     //  - zxing / sardine / slf4j：jar 内 spider 引用的宿主侧库（dex 解析确认的完整外部清单）
     implementation(files("libs/wrapper-java-fish-3.2.3.jar"))
-    implementation("wang.harlon.quickjs:wrapper-android:3.2.3")
+    // exclude 传递的官方 wrapper-java（类已被补丁版 wrapper-java-fish 取代，否则 DuplicateClasses）
+    implementation("wang.harlon.quickjs:wrapper-android:3.2.3") {
+        exclude(group = "wang.harlon.quickjs", module = "wrapper-java")
+    }
     implementation("com.google.zxing:core:3.5.4")
     implementation("com.github.thegrizzlylabs:sardine-android:0.9")
     implementation("org.slf4j:slf4j-api:1.7.36")

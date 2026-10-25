@@ -38,7 +38,8 @@ class JsSpider(
         ctx.set("console", console)
 
         // 注入 request()/http()/fetch() —— SpiderHttp 桥（okhttp + 编码探测 + gzip 解压）
-        val global = ctx.getGlobalObject()
+        // taoweiji SDK：JSContext extends JSObject，context 本身即全局对象
+        val global = ctx
         global.registerJavaMethod(SpiderHttp.requestCallback, "request")
         global.registerJavaMethod(SpiderHttp.httpCallback, "http")
         global.registerJavaMethod(SpiderHttp.fetchCallback, "fetch")

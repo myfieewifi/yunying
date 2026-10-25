@@ -77,7 +77,7 @@ object ConfigLoader {
         }
         if (content.startsWith("2423")) {
             val data = content.substring(content.indexOf("2324") + 4, content.length - 26)
-            val body = String(content.hexToBytes(), Charsets.ISO_8859_1).toLowerCase()
+            val body = String(content.hexToBytes(), Charsets.ISO_8859_1).lowercase()
             val key = body.substring(body.indexOf("$#") + 2, body.indexOf("#$")).padding('0', 16)
             val iv = body.substring(body.length - 13).padding('0', 16)
             content = String(aesCbc(data.hexToBytes(), key.toByteArray(Charsets.ISO_8859_1), iv.toByteArray(Charsets.ISO_8859_1)), Charsets.UTF_8)

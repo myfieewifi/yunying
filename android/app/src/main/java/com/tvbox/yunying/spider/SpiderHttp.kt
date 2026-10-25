@@ -57,9 +57,8 @@ object SpiderHttp {
         opts?.let { o ->
             val headers = runCatching { o.getObject("headers") }.getOrNull()
             headers?.let { h ->
-                for (i in 0 until h.length()) {
-                    val k = h.getString(i) ?: continue
-                    val v = runCatching { h.get(i).toString() }.getOrNull() ?: continue
+                for (k in runCatching { h.getKeys() }.getOrNull() ?: emptyArray()) {
+                    val v = runCatching { h.get(k) }.getOrNull()?.toString() ?: continue
                     if (k.equals("User-Agent", true) || k.equals("Accept-Encoding", true)) continue
                     builder.header(k, v)
                 }
@@ -74,7 +73,7 @@ object SpiderHttp {
                 ?.let { it.toMediaTypeOrNull() } ?: "application/x-www-form-urlencoded".toMediaTypeOrNull()
             builder.method(method, bodyText.toRequestBody(contentType))
         } else if (isForm) {
-            builder.method(method, ByteArray(0).let { "".toRequestBody(it.toMediaTypeOrNull()) })
+            builder.method(method, "".toRequestBody("application/x-www-form-urlencoded".toMediaTypeOrNull()))
         } else {
             builder.get()
         }

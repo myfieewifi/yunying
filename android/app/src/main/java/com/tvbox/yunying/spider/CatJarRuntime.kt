@@ -162,7 +162,8 @@ class CatJarSpider(
         val raw = (json.getOrNull() ?: "").takeIf { it.isNotBlank() } ?: return mapOf("list" to emptyList<Any>())
         val parsed = runCatching { gson.fromJson(raw, Map::class.java) }.getOrNull()
             ?: return mapOf("list" to emptyList<Any>())
-        return parsed
+        @Suppress("UNCHECKED_CAST")
+        return parsed as Map<String, Any?>
     }
 
     override fun playerContent(flag: String, id: String, flags: List<String>): Map<String, Any?> {
@@ -170,7 +171,8 @@ class CatJarSpider(
         val raw = (json.getOrNull() ?: "").takeIf { it.isNotBlank() }
             ?: return mapOf("url" to id, "parse" to 0, "header" to "", "playUrl" to "", "jx" to 0)
         val parsed = runCatching { gson.fromJson(raw, Map::class.java) }.getOrNull()
-        return parsed ?: mapOf("url" to id, "parse" to 0, "header" to "", "playUrl" to "", "jx" to 0)
+        @Suppress("UNCHECKED_CAST")
+        return (parsed as? Map<String, Any?>) ?: mapOf("url" to id, "parse" to 0, "header" to "", "playUrl" to "", "jx" to 0)
     }
 
     private fun result(call: Result<String?>, fallback: SpiderResult): SpiderResult {

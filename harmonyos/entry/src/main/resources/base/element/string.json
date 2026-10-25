@@ -1,0 +1,7 @@
+{
+  "string": [
+    { "name": "module_desc", "value": "云映主模块" },
+    { "name": "entry_label", "value": "云映" },
+    { "name": "ability_desc", "value": "云映播放器" }
+  ]
+}

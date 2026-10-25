@@ -1,0 +1,11 @@
+{
+  "modelVersion": "5.0.0",
+  "name": "yunying",
+  "version": "1.0.0",
+  "description": "云映 HarmonyOS NEXT 客户端",
+  "main": "",
+  "author": "",
+  "license": "",
+  "dependencies": {},
+  "devDependencies": {}
+}

@@ -1,0 +1,11 @@
+/node_modules
+/oh_modules
+/.hvigor
+/local.properties
+/.idea
+/entry/build
+/entry/oh_modules
+/entry/.cxx
+**/oh_modules
+**/.hvigor
+**/build

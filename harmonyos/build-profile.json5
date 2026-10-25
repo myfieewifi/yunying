@@ -1,0 +1,41 @@
+/*
+ * 云映 HarmonyOS 工程级构建配置（对齐 deskflow-harmonyos / moonlight-harmony 的 CI 实证组合）：
+ *   - modelVersion 5.0.0 工程 + 现代 hvigor 6.x 可构建（moonlight 实证）
+ *   - compatibleSdkVersion 5.0.0(12)：可运行于任意纯血鸿蒙 NEXT 设备
+ *   - compileSdkVersion 省略：默认使用 CLI 工具内置 SDK
+ *   - signingConfigs 留空：CI 产出未签名 HAP
+ */
+{
+  "app": {
+    "signingConfigs": [],
+    "products": [
+      {
+        "name": "default",
+        "compatibleSdkVersion": "5.0.0(12)",
+        "runtimeOS": "HarmonyOS",
+        "buildOption": {
+          "strictMode": {
+            "caseSensitiveCheck": true,
+            "useNormalizedOHMUrl": true
+          }
+        }
+      }
+    ],
+    "buildModeSet": [
+      { "name": "debug" },
+      { "name": "release" }
+    ]
+  },
+  "modules": [
+    {
+      "name": "entry",
+      "srcPath": "./entry",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": ["default"]
+        }
+      ]
+    }
+  ]
+}

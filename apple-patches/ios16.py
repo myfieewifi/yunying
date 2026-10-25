@@ -484,12 +484,28 @@ def patch_project_yml():
         warnings.append('missing project.yml')
         return
     s = p.read_text(encoding='utf-8')
-    new = s.replace("iOS: '18.0'", "iOS: '16.0'", 1)
+    # 上游可能是 '17.0' 或 '18.0'，一并用正则归到 '16.0'
+    new = re.sub(r"iOS:\s*'1[78]\.0'", "iOS: '16.0'", s)
     if new == s:
-        warnings.append("project.yml iOS deployment target '18.0' pattern not found")
+        warnings.append("project.yml iOS deployment target '17/18.0' pattern not found")
     p.write_text(new, encoding='utf-8')
-    if 'iOS: ' + "'16.0'" in new:
-        print("  patched project.yml: deploymentTarget iOS 18.0 → 16.0")
+    if "iOS: '16.0'" in new and not new == s:
+        print("  patched project.yml: deploymentTarget iOS → 16.0")
+
+
+def patch_package_swift():
+    path = SRC / 'Package.swift'
+    if not path.exists():
+        warnings.append('missing Package.swift')
+        return
+    s = path.read_text(encoding='utf-8')
+    if '.iOS(.v16)' in s:
+        return
+    if '.iOS(.v17)' not in s:
+        warnings.append('Package.swift .iOS(.v17) pattern not found')
+        return
+    path.write_text(s.replace('.iOS(.v17)', '.iOS(.v16)', 1), encoding='utf-8')
+    print('  patched Package.swift: TVCore platforms .iOS(.v17) → .iOS(.v16)')
 
 # ────────────────────────── 入口 ──────────────────────────
 
@@ -501,6 +517,7 @@ def main():
     manual_patches()
     print('▶ 2/4 project.yml deployment target')
     patch_project_yml()
+    patch_package_swift()
     print('▶ 3/4 collect @Observable class names')
     Searching = [SRC / 'App', SRC / 'Sources' / 'TvCore' if (SRC / 'Sources' / 'TvCore').exists() else SRC / 'Sources' / 'TVCore']
     for path in walk([SRC / 'App', SRC / 'Sources' / 'TVCore']):

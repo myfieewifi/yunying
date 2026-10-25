@@ -6,7 +6,9 @@ plugins {
 
 android {
     namespace = "com.tvbox.yunying"
-    compileSdk = 34
+    // okhttp-android 5.5.0 的 AAR 元数据硬性要求 compileSdk ≥ 37（vendored catvod/quickjs 也要 5.x API）；
+    // targetSdk 保持 34，不主动引入新运行时行为
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.tvbox.yunying"

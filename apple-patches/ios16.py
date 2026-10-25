@@ -653,14 +653,15 @@ def product_renames():
 
 
 def product_versions():
-    """版本号初始化为 1.0（marketing 1.0.0 / build 1）。"""
+    """版本号初始化为 1.0（marketing 1.0.0 / build 1）。正则匹配，不依赖上游当前版本号
+    （上游已从 1.7.13 升到 1.8.0，写死的精确文本会静默失配）。"""
     py = SRC / 'project.yml'
     if not py.exists():
         warnings.append('product_versions: missing project.yml')
         return
     s = py.read_text(encoding='utf-8')
-    new = s.replace("MARKETING_VERSION: '1.7.13'", "MARKETING_VERSION: '1.0.0'", 1)
-    new = new.replace("CURRENT_PROJECT_VERSION: '32'", "CURRENT_PROJECT_VERSION: '1'", 1)
+    new = re.sub(r"MARKETING_VERSION:\s*'[^']*'", "MARKETING_VERSION: '1.0.0'", s, count=1)
+    new = re.sub(r"CURRENT_PROJECT_VERSION:\s*'[^']*'", "CURRENT_PROJECT_VERSION: '1'", new, count=1)
     if new == s:
         warnings.append("product_versions: MARKETING_VERSION/CURRENT_PROJECT_VERSION patterns not found")
     py.write_text(new, encoding='utf-8')
@@ -767,12 +768,12 @@ def product_patches():
 
 
 def player_menu_patches():
-    """手机播放器：顶栏只留 返回/标题/投屏 + 右上角一个 ⋯ 菜单（选集/画质/画面/音轨/字幕/倍速/画中画/弹幕/旋转）。"""
+    """手机播放器：顶栏只留 返回/标题/投屏；选集/倍速/画质/弹幕等放到底部控制条（腾讯视频式）。"""
     # 1) 新增两个 sheet 状态（片头片尾设置、弹幕设置——原 CatalogPlaybackActions 的状态）
     patch_text('App/MobilePlayer.swift',
                '    @State private var showsDanmakuList = false\n',
                '''    @State private var showsDanmakuList = false
-    // YunYing：剧集/弹幕设置的 sheet 状态（原属 CatalogPlaybackActions，现并入右上角菜单）
+    // YunYing：剧集/弹幕设置的 sheet 状态（原属 CatalogPlaybackActions，现放底部控制条）
     @State private var showsSkipIntro = false
     @State private var showsCatalogDanmaku = false
 ''',
@@ -816,17 +817,29 @@ def player_menu_patches():
                '',
                'MobilePlayer toolbar stripped to AirPlay')
 
-    # 3) optionsMenu 重写为唯一右上角菜单（腾讯/爱奇艺式分区下拉）
+    # 3) 顶栏移除右上角 ⋯ 菜单（控件全部下沉到底部控制条）
     patch_text('App/MobilePlayer.swift',
-               '''    /// The picture, sound and subtitle settings in one menu: what AVKit's ⋯ menu held, and the stream's quality.
-    private var optionsMenu: some View {
-        Menu {
-            if session.qualities.count > 1 { Menu(L10n.text("Quality")) { QualityPicker(session: session) } }''',
-               '''    /// YunYing：腾讯/爱奇艺式右上角 ⋯ 菜单——选集、画质、画面、音轨、字幕、倍速与播放器开关全部收进这里。
-    private var optionsMenu: some View {
-        Menu {
+               '            HStack(spacing: 10) { toolbar; optionsMenu }',
+               '''            toolbar // YunYing：右上角 ⋯ 菜单移除，控件放底部控制条''',
+               'MobilePlayer topRow drops optionsMenu')
+
+    # 4) controls 底部插入控制条（在进度条上方）
+    patch_text('App/MobilePlayer.swift',
+               '                if showsTransport { bottomRow }',
+               '''                if showsTransport {
+                    bottomActions // YunYing：腾讯视频式底部控制条
+                    bottomRow
+                }''',
+               'MobilePlayer controls insert bottomActions')
+
+    # 5) 底部控制条本体：选集/倍速/画质/弹幕/字幕/音轨/画中画/旋转/铺满
+    patch_text('App/MobilePlayer.swift',
+               '''    /// The position moved by a button or the seek bar: the Lock Screen follows.''',
+               '''    /// YunYing：腾讯视频式底部控制条——常用操作平铺在进度条上方，低频项收进对应菜单。
+    private var bottomActions: some View {
+        HStack(spacing: 14) {
             if channel.historyContext != nil, let catalog = store.catalog(for: channel) {
-                Section(L10n.text("Episodes")) {
+                Menu {
                     Toggle(L10n.text("Auto-play next episode"), isOn: Binding(
                         get: { store.autoPlayNext }, set: { store.autoPlayNext = $0 }))
                     Menu(L10n.text("Episodes")) {
@@ -839,68 +852,184 @@ def player_menu_patches():
                         }
                     }
                     .disabled(store.resolvingEpisode != nil)
-                    Toggle(L10n.text("Automatically skip intro and outro"), isOn: Binding(
-                        get: { session.skipSettings.enabled },
-                        set: { value in
-                            var settings = session.skipSettings
-                            settings.enabled = value
-                            session.applySkipSettings(settings)
-                        }))
                     Button(L10n.text("Skip intro / outro")) { showsSkipIntro = true }
                         .accessibilityIdentifier("player.skip")
+                    if let error = store.episodeError { Text(error) }
+                } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: "list.bullet").font(.headline)
+                        Text(L10n.text("Episodes")).font(.caption2).lineLimit(1).minimumScaleFactor(0.6)
+                    }
+                    .frame(width: 56, height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L10n.text("Episodes"))
+            }
+            if !session.isLive {
+                Menu {
+                    Picker(L10n.text("Playback Speed"), selection: Binding(get: { speed }, set: { speed = $0; session.setSpeed($0) })) {
+                        ForEach(Self.speeds, id: \\.self) { Text(Self.speedLabel($0)).tag($0) }
+                    }
+                    .pickerStyle(.inline)
+                } label: {
+                    VStack(spacing: 3) {
+                        Text(Self.speedLabel(speed)).font(.subheadline.weight(.semibold)).monospacedDigit()
+                        Text(L10n.text("Playback Speed")).font(.caption2).lineLimit(1).minimumScaleFactor(0.6)
+                    }
+                    .frame(width: 56, height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L10n.text("Playback Speed"))
+            }
+            if session.qualities.count > 1 {
+                Menu {
+                    QualityPicker(session: session)
+                    if pictureSwitches {
+                        Section(L10n.text("Picture")) {
+                            if VideoEnhancement.canSmooth { Toggle(L10n.text("Smooth Motion (60 fps)"), isOn: $smoothsVideo) }
+                            if VideoEnhancement.canUpscale { Toggle(L10n.text("Sharper Picture"), isOn: $upscalesVideo) }
+                        }
+                    }
+                } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: "rectangle.badge.play").font(.headline)
+                        Text(L10n.text("Quality")).font(.caption2).lineLimit(1).minimumScaleFactor(0.6)
+                    }
+                    .frame(width: 56, height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L10n.text("Quality"))
+            }
+            if !session.danmaku.isEmpty {
+                Menu {
+                    Toggle(isOn: $showsDanmaku) { Label(L10n.text("Show Danmaku"), systemImage: "text.bubble") }
+                    Button { showsDanmakuList = true } label: { Label(L10n.text("Danmaku List"), systemImage: "list.bullet.rectangle") }
                     if channel.historyContext?.sourceKey != Bilibili.siteKey {
                         Button(L10n.text("Danmaku")) { showsCatalogDanmaku = true }
                             .accessibilityIdentifier("player.danmaku")
                     }
-                    if let error = store.episodeError { Text(error) }
-                }
-            }
-            if session.qualities.count > 1 { Menu(L10n.text("Quality")) { QualityPicker(session: session) } }''',
-               'MobilePlayer optionsMenu episodes section')
-
-    patch_text('App/MobilePlayer.swift',
-               '''            Toggle(L10n.text("Fill Screen"), isOn: $fillsScreen)
-        } label: {
-            Image(systemName: "slider.horizontal.3").font(.headline).frame(width: 22, height: 22)
-                .symbolVariant(pictureSwitches && (upscalesVideo || smoothsVideo) ? .fill : .none)
-        }
-        .chromeButton()
-        // "Playback Options" is the catalog's episode menu beside it.
-        .accessibilityLabel(L10n.text("Settings"))
-        .accessibilityIdentifier("player.options")
-    }''',
-               '''            Section(L10n.text("Settings")) {
-                Toggle(L10n.text("Fill Screen"), isOn: $fillsScreen)
-                if pip.supported {
-                    Button {
-                        pip.toggle()
-                    } label: { Label(L10n.text("Picture in Picture"), systemImage: pip.active ? "pip.exit" : "pip.enter") }
-                    .disabled(!pip.possible && !pip.active)
-                }
-                if !session.danmaku.isEmpty {
-                    Toggle(isOn: $showsDanmaku) { Label(L10n.text("Show Danmaku"), systemImage: "text.bubble") }
-                    Button { showsDanmakuList = true } label: { Label(L10n.text("Danmaku List"), systemImage: "list.bullet.rectangle") }
-                }
-                if PlayerOrientation.available, horizontalSizeClass == .compact || verticalSizeClass == .compact {
-                    let landscape = verticalSizeClass == .compact
-                    Button { PlayerOrientation.set(landscape: !landscape) } label: {
-                        Label(L10n.text(landscape ? "Rotate to Portrait" : "Rotate to Landscape"),
-                              systemImage: landscape ? "rectangle.portrait.rotate" : "rectangle.landscape.rotate")
+                } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: showsDanmaku ? "text.bubble.fill" : "text.bubble").font(.headline)
+                        Text(L10n.text("Danmaku")).font(.caption2).lineLimit(1).minimumScaleFactor(0.6)
                     }
+                    .frame(width: 56, height: 44).contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L10n.text("Danmaku"))
             }
-        } label: {
-            Image(systemName: "ellipsis.circle").font(.headline).frame(width: 22, height: 22)
+            if let legible = tracks.legible, !legible.options.isEmpty {
+                Menu(L10n.text("Subtitles")) {
+                    Picker(L10n.text("Subtitles"), selection: Binding(get: { tracks.selected(in: legible) }, set: { tracks.select($0, in: legible) })) {
+                        if legible.group.allowsEmptySelection { Text(L10n.text("Off")).tag(AVMediaSelectionOption?.none) }
+                        ForEach(legible.options, id: \\.self) { Text($0.displayName).tag(Optional($0)) }
+                    }
+                    .pickerStyle(.inline)
+                } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: "captions.bubble").font(.headline)
+                        Text(L10n.text("Subtitles")).font(.caption2).lineLimit(1).minimumScaleFactor(0.6)
+                    }
+                    .frame(width: 56, height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L10n.text("Subtitles"))
+            }
+            if let audio = tracks.audio, audio.options.count > 1 {
+                Menu(L10n.text("Audio")) {
+                    Picker(L10n.text("Audio"), selection: Binding(get: { tracks.selected(in: audio) }, set: { tracks.select($0, in: audio) })) {
+                        ForEach(audio.options, id: \\.self) { Text($0.displayName).tag(Optional($0)) }
+                    }
+                    .pickerStyle(.inline)
+                } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: "waveform").font(.headline)
+                        Text(L10n.text("Audio")).font(.caption2).lineLimit(1).minimumScaleFactor(0.6)
+                    }
+                    .frame(width: 56, height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L10n.text("Audio"))
+            }
+            if pip.supported {
+                Button { pip.toggle() } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: pip.active ? "pip.exit" : "pip.enter").font(.headline)
+                        Text(L10n.text("Picture in Picture")).font(.caption2).lineLimit(1).minimumScaleFactor(0.6)
+                    }
+                    .frame(width: 56, height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!pip.possible && !pip.active)
+                .opacity((pip.possible || pip.active) ? 1 : 0.38)
+                .accessibilityLabel(L10n.text("Picture in Picture"))
+            }
+            if PlayerOrientation.available, horizontalSizeClass == .compact || verticalSizeClass == .compact {
+                let landscape = verticalSizeClass == .compact
+                Button { PlayerOrientation.set(landscape: !landscape) } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: landscape ? "rectangle.portrait.rotate" : "rectangle.landscape.rotate").font(.headline)
+                        Text(L10n.text(landscape ? "Rotate to Portrait" : "Rotate to Landscape")).font(.caption2).lineLimit(1).minimumScaleFactor(0.6)
+                    }
+                    .frame(width: 56, height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L10n.text(landscape ? "Rotate to Portrait" : "Rotate to Landscape"))
+            }
+            Spacer(minLength: 0)
+            Button { fillsScreen.toggle() } label: {
+                VStack(spacing: 3) {
+                    Image(systemName: fillsScreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right").font(.headline)
+                    Text(L10n.text("Fill Screen")).font(.caption2).lineLimit(1).minimumScaleFactor(0.6)
+                }
+                .frame(width: 56, height: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(L10n.text("Fill Screen"))
         }
-        .chromeButton()
-        .accessibilityLabel(L10n.text("Settings"))
-        .accessibilityIdentifier("player.options")
+        .simultaneousGesture(TapGesture().onEnded { poke() })
         .sheet(isPresented: $showsSkipIntro) { EpisodeSkipSettingsView(session: session) }
         .sheet(isPresented: $showsCatalogDanmaku) {
             CatalogDanmakuSettingsView(model: session.catalogDanmaku, channelName: channel.name)
         }
+    }
+
+    /// The position moved by a button or the seek bar: the Lock Screen follows.''',
+               'MobilePlayer bottomActions row')
+
+    # 6) 投屏按钮：去掉 glass 包装（iOS 26 的 glassEffect(interactive) 会隔住 UIViewRepresentable
+    #    的触点，AVRoutePickerView 收不到点按就弹不出选设备面板），并显式开启交互。
+    patch_text('App/MobilePlayer.swift',
+               '''            if tvBrowser.receivers.isEmpty {
+                AirPlayButton()
+                    .frame(width: 44, height: 44)
+                    .glassSurface(.regular.interactive(), in: Circle())
+                    .contentShape(Circle())
+            } else {''',
+               '''            if tvBrowser.receivers.isEmpty {
+                // YunYing：投屏按钮不做 glass 包装，保证点按直达 AVRoutePickerView 弹出选设备面板。
+                AirPlayButton()
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            } else {''',
+               'MobilePlayer AirPlay button unwrapped')
+
+    patch_text('App/MobilePlayer.swift',
+               '''    func makeUIView(context: Context) -> AVRoutePickerView {
+        let view = AVRoutePickerView()
+        view.prioritizesVideoDevices = true
+        view.tintColor = .white
+        return view
     }''',
-               'MobilePlayer optionsMenu player section + sheets')
+               '''    func makeUIView(context: Context) -> AVRoutePickerView {
+        let view = AVRoutePickerView()
+        view.prioritizesVideoDevices = true
+        view.tintColor = .white
+        // YunYing：显式开启交互，选路器面板才会随点按弹出。
+        view.isUserInteractionEnabled = true
+        return view
+    }''',
+               'MobilePlayer AirPlayButton interaction')
 
 
 def patch_project_yml():

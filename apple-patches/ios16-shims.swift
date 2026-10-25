@@ -27,12 +27,13 @@ struct YyBind<M: ObservableObject> {
     private let model: M
     init(_ model: M) { self.model = model }
 
+    // 只有这一个可写形态：类模型的 var 成员对应 ReferenceWritableKeyPath。
+    // 旧版还曾按 WritableKeyPath 重载一份，keypath 字面量可上转型成多个候选，产生
+    // "ambiguous use of 'subscript(dynamicMember:)'"，故删除（let 成员走下面的只读档）。
     subscript<V>(dynamicMember kp: ReferenceWritableKeyPath<M, V>) -> Binding<V> {
         Binding(get: { model[keyPath: kp] }, set: { model[keyPath: kp] = $0 })
     }
-    subscript<V>(dynamicMember kp: WritableKeyPath<M, V>) -> Binding<V> {
-        Binding(get: { model[keyPath: kp] }, set: { model[keyPath: kp] = $0 })
-    }
+    @_disfavoredOverload
     subscript<V>(dynamicMember kp: KeyPath<M, V>) -> Binding<V> {
         Binding(get: { model[keyPath: kp] }, set: { _ in })
     }
@@ -42,7 +43,8 @@ struct YyBind<M: ObservableObject> {
 // Store.searchModel/music 等是“被观察的子对象”。UIView 观察的是父级
 // ObservableObject，所以这里把子对象的 objectWillChange 合流进父级的
 // objectWillChange，保持 iOS 17 中隐式追踪的视觉行为。
-final class YyObservationHub {
+// Swift 6 严格并发：共享单例标 @unchecked Sendable；事件投递序列化由锁保护。
+final class YyObservationHub: @unchecked Sendable {
     static let shared = YyObservationHub()
     private let lock = NSLock()
     private var bag: [ObjectIdentifier: [AnyCancellable]] = [:]
@@ -53,8 +55,10 @@ final class YyObservationHub {
         guard bag[id] == nil else { return }
         var items: [AnyCancellable] = []
         for child in children {
-            let cancellable = child.objectWillChange.sink { [weak target] _ in
-                target?.objectWillChange.send()
+            // 泛型 ObservableObject 的 objectWillChange 是关联类型，统一收敛到默认 publisher
+            guard let publisher = child.objectWillChange as? ObservableObjectPublisher else { continue }
+            let cancellable = publisher.sink { [weak target] _ in
+                (target?.objectWillChange as? ObservableObjectPublisher)?.send()
             }
             items.append(cancellable)
         }
@@ -79,6 +83,8 @@ extension ObservableObject where Self: AnyObject {
 }
 
 // MARK: - onChange(of:initial:_:)（iOS 17 双参数闭包）在 iOS 16 的实现
+// iOS16 专用：tvOS17/macOS15 目标走 SDK 原生 onChange（同签名重载在这些平台会二义）。
+#if os(iOS)
 @available(iOS 16.0, *)
 private struct YyOnChangeSync<V: Equatable>: ViewModifier {
     let value: V
@@ -142,18 +148,22 @@ extension View {
         modifier(YyOnChangeAsync(value: value, initial: initial, action: { _, _ in await action() }))
     }
 }
+#endif
 
-// MARK: - withAnimation(_:completion:_:)（iOS 17 动画完成回调）的近似实现
+// MARK: - withAnimation(_:completion:_:)（iOS 17 动画完成回调）的近似实现（iOS16 专用，见上）
+#if os(iOS)
 @available(iOS 16.0, *)
 func withAnimation<Result>(_ animation: Animation?, completion: @escaping () -> Void, _ body: () -> Result) -> Result {
     let value = withAnimation(animation) { body() }
-    // 没有完成回调钩子：用动画时长 + 余量的延迟近似的时序
-    let delay = { (a: Animation?) -> Double in if a == nil { return 0.35 }; return 0.45 }()
+    // 没有完成回调钩子：用动画时长 + 余量的延迟近似时序
+    let delay = animation == nil ? 0.35 : 0.45
     DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: completion)
     return value
 }
+#endif
 
-// MARK: - 只在 iOS 17+ 可用、且参数不引用新类型的无副作用垫片
+// MARK: - 只在 iOS 17+ 可用、且参数不引用新类型的无副作用垫片（iOS16 专用）
+#if os(iOS)
 extension View {
     /// scrollClipDisabled 在 iOS 17+；iOS 16 上保持默认裁剪（视觉差异可接受）
     @available(iOS 16.0, *)
@@ -173,6 +183,7 @@ extension View {
     @available(iOS 16.0, *)
     func containerRelativeFrame(_ axes: Axis.Set, alignment: Alignment = .center, _ length: @escaping (CGFloat, Axis) -> CGFloat) -> some View { self }
 }
+#endif
 
 // MARK: - ContentUnavailableView 的 iOS16 对应物（已把调用点重命名为 CUV）
 struct CUV: View {
@@ -185,7 +196,7 @@ struct CUV: View {
 
     init(_ title: String, systemImage: String, description: Text? = nil) {
         self.title = Text(title)
-        self.icon = Image(systemName: systemName)
+        self.icon = Image(systemName: systemImage)
         self.description = description
         self.labelView = nil
         self.descView = nil
@@ -283,10 +294,10 @@ extension View {
     }
 }
 
-// MARK: - onGeometryChange(for:of:action:)（iOS 18 API）的 iOS 16 实现
-// 上游形态：`.onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }`
-// 只标注 iOS 16 可用：macOS(15+)/tvOS 构建域中不可用，SDK 原生命中。
-@available(iOS 16.0, *)
+// MARK: - onGeometryChange(for:of:action:)（iOS 18 API）的 iOS 16/tvOS 17 实现
+// macOS 15 原生具备该 API，排除以免同签名重载二义。
+#if os(iOS) || os(tvOS)
+@available(iOS 16.0, tvOS 17.0, *)
 private struct YyGeometryProbe<T: Equatable>: ViewModifier {
     let transform: (GeometryProxy) -> T
     let action: (T) -> Void
@@ -303,15 +314,17 @@ private struct YyGeometryProbe<T: Equatable>: ViewModifier {
 }
 
 extension View {
-    @available(iOS 16.0, *)
+    @available(iOS 16.0, tvOS 17.0, *)
     func onGeometryChange<T: Equatable>(for type: T.Type, of transform: @escaping (GeometryProxy) -> T,
                                         action: @escaping (T) -> Void) -> some View {
         modifier(YyGeometryProbe(transform: transform, action: action))
     }
 }
+#endif
 
 // MARK: - iOS 16.4 才开的 presentationBackground / presentationCornerRadius 垫片
-// iOS16 目标用本垫片；tvOS17/macOS15 目标走 SDK 原版（iOS 可用性在此平台从不满足）。
+// (iOS16 目标用; tvOS17/macOS15 目标走 SDK 原版——同签名重载在这些平台会二义)
+#if os(iOS)
 extension View {
     /// iOS 16.0 上保留系统默认面板底色（毛玻璃效果降级为无垫底）。
     @available(iOS 16.0, *)
@@ -325,3 +338,22 @@ extension View {
     @available(iOS 16.0, *)
     func presentationCornerRadius(_ radius: CGFloat?) -> some View { self }
 }
+#endif
+
+// MARK: - Xcode 26 SDK 歧义消解：ToolbarItem 同时是 View 与 ToolbarContent，
+// `.toolbar { ToolbarItem(...) {...} }` 与 toolbar(content:) 的两个候选二义；
+// yyToolbar 显式走 ToolbarContent 泛型档（Content 泛型无法证明是 View，ViewBuilder 档被排除）。
+extension View {
+    @available(iOS 16.0, macOS 13.0, tvOS 16.4, *)
+    func yyToolbar<Content: ToolbarContent>(@ToolbarContentBuilder content: () -> Content) -> some View {
+        toolbar(content: content)
+    }
+}
+
+// MARK: - Text.foregroundStyle 需要 iOS 17（Xcode 26 SDK 报错）；iOS 16 用 foregroundColor 承接
+#if os(iOS)
+extension Text {
+    @available(iOS 16.0, *)
+    func foregroundStyle(_ color: Color) -> Text { foregroundColor(color) }
+}
+#endif

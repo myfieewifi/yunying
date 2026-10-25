@@ -164,8 +164,9 @@ def rewrite_zero_param_onchange(text):
 
 
 def numeric_text_downgrade(text):
-    """numericText(value:) 需要 iOS 17；iOS 16 用无值形态 numericText。"""
-    return re.sub(r'\.numericText\(value:\s*[^()]+?\)', '.numericText', text)
+    """numericText(value:) 需要 iOS 17；且 Xcode 26 SDK 下 iOS16 的 .numericText 属性
+    也已不可访问（报 need to call numericText(countsDown:)），统一换成 ContentTransition.opacity。"""
+    return re.sub(r'\.numericText\(value:\s*[^()]+?\)', '.opacity', text)
 
 
 def symbol_effect_downgrade(text):
@@ -173,6 +174,40 @@ def symbol_effect_downgrade(text):
     GlassKit breathingSymbol 由 manual_patches 单独处理（保留 if #available 分支）。"""
     text = re.sub(r'\.symbolEffect\(\.bounce,\s*value:\s*[A-Za-z0-9_.]+?\)', '', text)
     return text.replace('.symbolEffect(.variableColor.iterative)', '')
+
+
+def _find_matching_brace(text, start):
+    """从 start（应指向 '{'）返回匹配 '}' 的下标；找不到返回 len(text)。"""
+    depth = 0
+    for i in range(start, len(text)):
+        c = text[i]
+        if c == '{':
+            depth += 1
+        elif c == '}':
+            depth -= 1
+            if depth == 0:
+                return i
+    return len(text)
+
+
+def toolbar_disambiguate(text):
+    """Xcode 26 SDK 把 ToolbarItem 归入 View，令 `.toolbar { ToolbarItem(...) }` 与
+    toolbar(content:) 的 ViewBuilder/ToolbarContentBuilder 两候选二义。
+    含 ToolbarItem 的块改写为 `.yyToolbar {`（shim 显式泛型 ToolbarContent 档）。"""
+    marker = '.toolbar {'
+    idx = 0
+    while True:
+        i = text.find(marker, idx)
+        if i < 0:
+            return text
+        j = text.find('{', i)
+        k = _find_matching_brace(text, j)
+        block = text[j:k]
+        if re.search(r'\bToolbarItem(?:Group)?\s*\(', block):
+            text = text[:i] + '.yyToolbar {' + text[i + len(marker):]
+            idx = i + len('.yyToolbar {')
+        else:
+            idx = i + len(marker)
 
 
 def balanced_delete(text, name):
@@ -191,6 +226,22 @@ def balanced_delete(text, name):
             elif c == ')':
                 depth -= 1
             i += 1
+        # 若紧跟着尾随闭包 `{ ... }`（如 sensoryFeedback），一并吞掉，避免残留
+        j = i
+        while j < n and text[j] in ' \t\r\n':
+            j += 1
+        if j < n and text[j] == '{':
+            k, bdepth = j, 0
+            while k < n:
+                c = text[k]
+                if c == '{':
+                    bdepth += 1
+                elif c == '}':
+                    bdepth -= 1
+                    if bdepth == 0:
+                        break
+                k += 1
+            i = k + 1
         text = text[:idx] + text[i:]
 
 
@@ -375,8 +426,15 @@ def process_file(path):
     text = numeric_text_downgrade(text)
     text = symbol_effect_downgrade(text)
     text = rewrite_zero_param_onchange(text)
+    # transition(.blurReplace) 需要 iOS 17；iOS 16 用普通 opacity 过渡
+    text = text.replace('.transition(.blurReplace)', '.transition(.opacity)')
+    # ScrollView 无参尾闭调用在 Xcode 26 SDK 下与 init(_:content:) 新候选二义；
+    # 显式 showsIndicators 让新候选不适用（它没有该参数）
+    text = re.sub(r'(?<![\w.])ScrollView \{', 'ScrollView(.vertical, showsIndicators: true) {', text)
+    # toolbar 且内容含 ToolbarItem 的块改写为 .yyToolbar {（消 Xcode 26 SDK 二义）
+    text = toolbar_disambiguate(text)
     # 平衡删除
-    for name in ('scrollIndicators', 'scrollTargetLayout', 'sensoryFeedback'):
+    for name in ('scrollIndicators', 'scrollTargetLayout', 'sensoryFeedback', 'contentMargins'):
         text = balanced_delete(text, name)
     text = balanced_delete_brace(text, 'onScrollPhaseChange')
     # ContentUnavailableView → CUV（shim 自身文件除外）
@@ -610,7 +668,9 @@ def main():
         for bad in ('@Observable',
                     'ObservationIgnored', '@Bindable',
                     'import Observation', 'scrollTargetLayout',
-                    'sensoryFeedback', 'ContentUnavailableView('):
+                    'sensoryFeedback', 'ContentUnavailableView(',
+                    '.numericText(', '.blurReplace', '.contentMargins(',
+                    'toolbar { ToolbarItem', '.symbolEffect(.bounce', '.symbolEffect(.variableColor'):
             if bad in text and 'Shims' not in path.name:
                 warnings.append(f'{path.name}: residual "{bad}"')
     if warnings:

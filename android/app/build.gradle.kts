@@ -113,6 +113,17 @@ dependencies {
     // JS 运行时: QuickJS-Android（taoweiji/quickjs-android，square1io 的 jitpack 坐标不存在）
     implementation("io.github.taoweiji.quickjs:quickjs-android:1.4.6")
 
+    // FishCloud 系 jar（摸鱼儿订阅等）运行时依赖：
+    //  - wrapper-java-fish：官方 wang.harlon.quickjs:wrapper-java 3.2.3 打桥接补丁
+    //    （FishCloud 混淆壳把 lambda$setConsole$0/lambda$setProperty$0 改名为 a，见 scripts/patch-wrapper.py）
+    //  - wrapper-android：配套原生 libquickjs-android-wrapper.so（与 vendored :quickjs 的 libquickjs-wrapper.so 不冲突）
+    //  - zxing / sardine / slf4j：jar 内 spider 引用的宿主侧库（dex 解析确认的完整外部清单）
+    implementation(files("libs/wrapper-java-fish-3.2.3.jar"))
+    implementation("wang.harlon.quickjs:wrapper-android:3.2.3")
+    implementation("com.google.zxing:core:3.5.4")
+    implementation("com.github.thegrizzlylabs:sardine-android:0.9")
+    implementation("org.slf4j:slf4j-api:1.7.36")
+
     // mpv 内核（libmpv）——预编译 AAR，CI/本地手动下载放到 android/app/libs/ 下，文件名匹配 libmpv*.aar
     // mpv-android 官方 Release 只发布 APK，没有稳定 AAR 坐标，因此不提供 Maven 兜底依赖；
     // MpvPlayerEngine 为纯反射实现：没有 libmpv 时编译/打包不受影响，运行时优雅回退 ExoPlayer

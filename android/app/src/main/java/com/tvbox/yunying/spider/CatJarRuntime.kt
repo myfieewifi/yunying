@@ -64,6 +64,9 @@ object CatJarRuntime {
                 }
             }
             val cachePath = File(ctx.cacheDir, "catvod").apply { mkdirs() }.absolutePath
+            // Android 10+（API 29+）W^X 限制：可写位置的 dex 禁止加载（"Writable dex file" 报错），
+            // 加载前必须把 jar 置为只读（对齐 FongMi JarLoader.openDex）
+            if (!file.setReadOnly()) throw IllegalStateException("无法将 jar 置为只读: $file")
             val loader = DexClassLoader(file.absolutePath, cachePath, cachePath, RuntimeModule.getSpiderClassLoader())
             runCatching {
                 val clz = loader.loadClass("com.github.catvod.spider.Init")

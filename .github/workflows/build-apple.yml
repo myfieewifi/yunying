@@ -29,6 +29,27 @@ jobs:
           chmod +x apple-patches/apply.sh apple-patches/Runtime/PythonHost/build-python-ios.sh
           apple-patches/apply.sh
 
+      - name: Restore FFmpeg build cache
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/tvbox-ffmpeg
+          key: tvbox-ffmpeg-${{ hashFiles('yingxia-src/Scripts/build-apple-ffmpeg.sh') }}
+          restore-keys: tvbox-ffmpeg-
+
+      - name: Build FFmpeg xcframework
+        run: |
+          # 上游 Package.swift 的 binaryTarget 指向 Vendor/FFmpeg/FFmpeg.xcframework，
+          # 但它只是指向 build/FFmpeg 的符号链接，产物需由该脚本构建（缓存按 recipe 哈希复用）
+          cd yingxia-src
+          chmod +x Scripts/build-apple-ffmpeg.sh
+          export JOBS=$(sysctl -n hw.ncpu)
+          bash Scripts/build-apple-ffmpeg.sh
+          # 缓存在 $HOME/Library，不随工件走：把 Vendor 里的符号链接（Vendor→build→缓存）替换成
+          # 解引用后的真实副本，下游 build job 解包工件即可直接参与 package 解析
+          rm -f Vendor/FFmpeg/FFmpeg.xcframework
+          cp -RL build/FFmpeg/FFmpeg.xcframework Vendor/FFmpeg/FFmpeg.xcframework
+          du -sh Vendor/FFmpeg/FFmpeg.xcframework
+
       - name: Resolve version
         id: version
         run: echo "v=$(cd yingxia-src && grep -m1 'MARKETING_VERSION' project.yml | sed -E 's/.*:[[:space:]]*//' | tr -d ' ' || echo 1.0.0)" >> "$GITHUB_OUTPUT"

@@ -1,5 +1,7 @@
-// CatVod 宿主运行时模块（vendored from FongMi/TV @fongmi, GPL-3.0�?// 提供 com.github.catvod.* 宿主类：spider jar 通过 DexClassLoader �?app classloader
-// �?parent 解析这些类（Spider 基类 / net.OkHttp / utils.Js / Runtime / Proxy 等）�?plugins {
+// CatVod 宿主运行时模块（vendored from FongMi/TV @fongmi, GPL-3.0）
+// 提供 com.github.catvod.* 宿主类：spider jar 通过 DexClassLoader 以 app classloader
+// 为 parent 解析这些类（Spider 基类 / net.OkHttp / utils.Js / Runtime / Proxy 等）。
+plugins {
     id 'com.android.library'
 }
 

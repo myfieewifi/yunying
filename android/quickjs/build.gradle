@@ -1,4 +1,7 @@
-// QuickJS (fongmi quickjs-ng) SDK + 插件入口（vendored from FongMi/TV @fongmi, GPL-3.0�?// 运行时插件（runtime-release）在映匣主程里就地打包：wrapper-java.jar 提供 com.fongmi.quickjs.* SDK�?// jniLibs 提供 libquickjs-wrapper.so；RuntimeModule 补丁支持进程内加载外部插件�?plugins {
+// QuickJS (fongmi quickjs-ng) SDK + 插件入口（vendored from FongMi/TV @fongmi, GPL-3.0）
+// 运行时插件（runtime-release）在映匣主程里就地打包：wrapper-java.jar 提供 com.fongmi.quickjs.* SDK，
+// jniLibs 提供 libquickjs-wrapper.so；RuntimeModule 补丁支持进程内加载外部插件。
+plugins {
     id 'com.android.library'
 }
 
@@ -17,8 +20,9 @@ android {
 }
 
 dependencies {
-    implementation 'org.jsoup:jsoup:1.21.1'  // HtmlQuery 用到 1.21 �?Selector.evaluatorOf / Element.selectStream
+    implementation 'org.jsoup:jsoup:1.21.1'  // HtmlQuery 用到 1.21 的 Selector.evaluatorOf / Element.selectStream
     implementation 'com.google.code.gson:gson:2.14.0'
     implementation 'com.squareup.okhttp3:okhttp:5.2.1'
-    compileOnly project(':catvod')   // 引用 Spider/QuickJsRuntime 类型；app 同时依赖两者，避免�?    api files('libs/wrapper-java.jar')
+    compileOnly project(':catvod')   // 引用 Spider/QuickJsRuntime 类型；app 同时依赖两者，避免环
+    api files('libs/wrapper-java.jar')
 }

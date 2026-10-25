@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+id("org.jetbrains.kotlin.plugin.compose")   // Kotlin 2.x 起 Compose 编译器随 Kotlin 编译器发布
     id("com.chaquo.python")   // 启用 Chaquopy，提供 Python 运行时
 }
 
@@ -51,7 +52,7 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
-    composeOptions { kotlinCompilerExtensionVersion = "1.5.14" }
+    // composeOptions 已废除（Kotlin 2.x 内置 Compose 编译器）
 
     // vendored GPL 模块里有些 API 版本断言与本项目 minSdk=21 有出入，避免 lint 卡发布构建
     lint {

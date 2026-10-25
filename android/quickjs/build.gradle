@@ -21,6 +21,8 @@ android {
 
 dependencies {
     implementation 'org.jsoup:jsoup:1.17.2'
+    implementation 'com.google.code.gson:gson:2.14.0'
+    implementation 'com.squareup.okhttp3:okhttp:5.5.0'
     compileOnly project(':catvod')   // 引用 Spider/QuickJsRuntime 类型；app 同时依赖两者，避免环
     api files('libs/wrapper-java.jar')
 }

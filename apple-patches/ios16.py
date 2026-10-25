@@ -405,6 +405,16 @@ def process_file(path):
 # ────────────────────────── 手工补丁 ──────────────────────────
 
 def manual_patches():
+    # 上游新代码在 Xcode 26.5 下：闭包捕获了后面才声明的局部 `var sites = sites`，把声明挪到前面。
+    patch_text('Sources/TVCore/ScriptSniffing.swift',
+               '''        let pending = sites.indices.filter { sites[$0].needsSniffing }
+        guard !pending.isEmpty else { return self }
+        var sites = sites''',
+               '''        var sites = sites
+        let pending = sites.indices.filter { sites[$0].needsSniffing }
+        guard !pending.isEmpty else { return self }''',
+               'ScriptSniffing capture-before-declaration')
+
     patch_text('App/GlassKit.swift',
                'extension EnvironmentValues { @Entry var stripDrag: StripDrag? = nil }',
                '''/// YunYing iOS16 补丁：@Entry 需要 iOS 18 宏展开，改为手写 EnvironmentKey。

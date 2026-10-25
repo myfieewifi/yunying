@@ -317,12 +317,13 @@ public class Spider extends com.github.catvod.crawler.Spider {
 
     private Map<String, String> proxyHeaders(Object header, boolean streaming) throws JSONException {
         if (streaming) return streamHeaders(header);
-        return header == null ? null : Json.toMap(header instanceof QuickJS.Json(String text) ? text : String.valueOf(header));
+        // YunYing 补丁：Java 17 不支持 record 解构模式，改为 instanceof + 强转
+        return header == null ? null : Json.toMap(header instanceof QuickJS.Json ? ((QuickJS.Json) header).text() : String.valueOf(header));
     }
 
     private Map<String, String> streamHeaders(Object header) throws JSONException {
         if (header == null) return null;
-        JSONObject object = new JSONObject(header instanceof QuickJS.Json(String text) ? text : String.valueOf(header));
+        JSONObject object = new JSONObject(header instanceof QuickJS.Json ? ((QuickJS.Json) header).text() : String.valueOf(header));
         Map<String, String> headers = new LinkedHashMap<>();
         for (Iterator<String> keys = object.keys(); keys.hasNext(); ) {
             String key = keys.next();
@@ -361,7 +362,7 @@ public class Spider extends com.github.catvod.crawler.Spider {
     }
 
     private Object jsonValue(Object value) throws JSONException {
-        if (value instanceof QuickJS.Json(String text)) return new JSONTokener(text).nextValue();
+        if (value instanceof QuickJS.Json) return new JSONTokener(((QuickJS.Json) value).text()).nextValue();
         if (!(value instanceof Object[] items)) return value;
         JSONArray array = new JSONArray();
         for (Object item : items) array.put(jsonValue(item));

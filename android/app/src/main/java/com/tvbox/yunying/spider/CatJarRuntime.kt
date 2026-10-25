@@ -76,13 +76,24 @@ object CatJarRuntime {
 
     private fun fetchJar(url: String, dest: File) {
         val temp = File(dest.path + ".part")
-        val req = okhttp3.Request.Builder().url(url).header("User-Agent", "Mozilla/5.0").build()
         val http = okhttp3.OkHttpClient.Builder().followRedirects(true).build()
-        val bytes = http.newCall(req).execute().use { resp ->
-            require(resp.isSuccessful) { "jar 下载失败 HTTP ${resp.code}: $url" }
-            resp.body?.bytes() ?: ByteArray(0)
+        // 部分订阅站按 UA 拦截（如 摸鱼儿 要求 okhttp/3.12.0），依次尝试常见 UA
+        val agents = listOf("okhttp/3.12.0", "Mozilla/5.0", "okhttp/4.12.0", "pluto-sdk/1.0")
+        var lastCode = 0
+        var bytes: ByteArray = ByteArray(0)
+        for (ua in agents) {
+            val req = okhttp3.Request.Builder().url(url).header("User-Agent", ua).build()
+            runCatching {
+                http.newCall(req).execute().use { resp ->
+                    lastCode = resp.code
+                    if (resp.isSuccessful) bytes = resp.body?.bytes() ?: ByteArray(0)
+                }
+            }
+            if (bytes.size > 4) break
         }
-        require(bytes.size > 4 && bytes.size < 512 * 1024 * 1024) { "jar 体积异常: ${bytes.size}" }
+        require(bytes.size > 4 && bytes.size < 512 * 1024 * 1024) {
+            "jar 下载失败 HTTP $lastCode（已尝试 ${agents.size} 种 UA）: $url"
+        }
         temp.writeBytes(bytes)
         if (!temp.renameTo(dest)) {
             dest.delete(); check(temp.renameTo(dest)) { "jar 落盘失败" }

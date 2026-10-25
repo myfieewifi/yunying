@@ -8,7 +8,9 @@ import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.PopupMenu
 import androidx.media3.ui.PlayerView
 import com.tvbox.yunying.R
 import com.tvbox.yunying.player.mpv.ExoPlayerEngine
@@ -17,9 +19,12 @@ import com.tvbox.yunying.player.mpv.MpvPlayerEngine
 /**
  * 播放器 Activity：支持 ExoPlayer（默认）与 mpv（全能内核）双内核切换。
  *
+ * 仿腾讯视频播放器交互：
+ * - 顶栏：返回（左）+ 标题（中）+ ⋯ 菜单（右）
+ * - ⋯ 菜单：倍速（0.5~3.0）/ 切换内核（Exo/mpv/Auto）/ 刷新重试
+ * - 底部控制条沿用 ExoPlayer 控制器（进度条/暂停/进度时间）
  * - 启动时读取 SharedPreferences 中 yunying_player_core 配置（exo/mpv/auto），默认 AUTO。
  * - AUTO 模式下 ExoPlayer 播放失败自动切 mpv 重试一次。
- * - 右上角提供内核切换按钮，点击后实时切换。
  */
 class PlayerActivity : AppCompatActivity(), PlayerEngine.PlayerListener {
 
@@ -27,7 +32,10 @@ class PlayerActivity : AppCompatActivity(), PlayerEngine.PlayerListener {
         const val EXTRA_URL = "url"
         const val EXTRA_PLAY_URL = "playUrl"
         const val EXTRA_TITLE = "title"
+        const val EXTRA_HEADERS = "headers"
         const val PREF_CORE = "yunying_player_core"
+
+        private val SPEEDS = floatArrayOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f, 3.0f)
     }
 
     private lateinit var playerContainer: FrameLayout
@@ -36,9 +44,11 @@ class PlayerActivity : AppCompatActivity(), PlayerEngine.PlayerListener {
     private var currentEngine: PlayerEngine? = null
     private var currentType: PlayerCoreType = PlayerCoreType.AUTO
     private var finalUrl: String = ""
+    private var headers: Map<String, String> = emptyMap()
+    private var titleText: String = ""
     private var fallbackUsed = false
-    private var coreSwitchBtn: ImageButton? = null
-    private var coreLabel: TextView? = null
+    private var titleView: TextView? = null
+    private var currentSpeed: Float = 1.0f
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -51,6 +61,9 @@ class PlayerActivity : AppCompatActivity(), PlayerEngine.PlayerListener {
         val url = intent.getStringExtra(EXTRA_URL) ?: run { finish(); return }
         val playUrl = intent.getStringExtra(EXTRA_PLAY_URL) ?: ""
         finalUrl = if (url.startsWith("http")) url else playUrl
+        titleText = intent.getStringExtra(EXTRA_TITLE) ?: "云映"
+        @Suppress("UNCHECKED_CAST")
+        headers = (intent.getSerializableExtra(EXTRA_HEADERS) as? HashMap<String, String>)?.toMap() ?: emptyMap()
 
         // 根容器
         playerContainer = FrameLayout(this).apply {
@@ -69,6 +82,7 @@ class PlayerActivity : AppCompatActivity(), PlayerEngine.PlayerListener {
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
             useController = true
+            setShowSubtitleButton(false)
         }
         playerContainer.addView(playerView)
 
@@ -83,44 +97,48 @@ class PlayerActivity : AppCompatActivity(), PlayerEngine.PlayerListener {
         textureViewForMpv = tv
         playerContainer.addView(tv)
 
-        // 右上角内核切换按钮+标签
+        // 顶栏：返回 + 标题 + ⋯（腾讯视频式）
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.END or Gravity.CENTER_VERTICAL
-            setPadding(24, 24, 24, 24)
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(12, 20, 12, 20)
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.TOP
             )
         }
-        coreLabel = TextView(this).apply {
-            setTextColor(Color.WHITE)
-            textSize = 14f
-            setPadding(16, 8, 16, 8)
-            setBackgroundColor(Color.parseColor("#88000000"))
-        }
-        coreSwitchBtn = ImageButton(this).apply {
-            setImageResource(android.R.drawable.ic_media_play)
-            setBackgroundColor(Color.TRANSPARENT)
-            setOnClickListener { switchCore() }
-        }
-        topBar.addView(coreLabel)
-        topBar.addView(coreSwitchBtn)
-        playerContainer.addView(topBar)
-
-        // 返回按钮
         val backBtn = ImageButton(this).apply {
-            setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
+            setImageResource(android.R.drawable.ic_menu_revert)
             setBackgroundColor(Color.TRANSPARENT)
             setOnClickListener { finish() }
-            layoutParams = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.TOP or Gravity.START
-            ).apply { setMargins(24, 24, 0, 0) }
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
         }
-        playerContainer.addView(backBtn)
+        titleView = TextView(this).apply {
+            text = titleText
+            setTextColor(Color.WHITE)
+            textSize = 16f
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding(16, 0, 16, 0)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        val menuBtn = ImageButton(this).apply {
+            setImageResource(android.R.drawable.ic_menu_more)
+            setBackgroundColor(Color.TRANSPARENT)
+            setOnClickListener { showPlayerMenu(it) }
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        }
+        topBar.addView(backBtn)
+        topBar.addView(titleView)
+        topBar.addView(menuBtn)
+        playerContainer.addView(topBar)
 
         setContentView(playerContainer)
 
@@ -133,6 +151,49 @@ class PlayerActivity : AppCompatActivity(), PlayerEngine.PlayerListener {
             else -> PlayerCoreType.AUTO
         }
         startEngine(currentType)
+    }
+
+    /** 右上角 ⋯ 菜单：倍速 / 内核 / 刷新（腾讯视频式下拉） */
+    private fun showPlayerMenu(anchor: View) {
+        val popup = PopupMenu(this, anchor)
+        popup.menu.apply {
+            val speedItem = add(Menu.NONE, Menu.NONE, 1, "倍速")
+            speedItem.isEnabled = currentEngine is ExoPlayerEngine
+            val speedMenu = speedItem.subMenu
+            SPEEDS.forEachIndexed { i, s ->
+                speedMenu?.add(1, Menu.FIRST + i, i, speedLabel(s))?.isChecked = s == currentSpeed
+            }
+            speedMenu?.setGroupCheckable(1, true, true)
+            add(Menu.NONE, Menu.NONE, 2, "切换内核（当前：${coreName(currentType)}）")
+            add(Menu.NONE, Menu.NONE, 3, "刷新重试")
+        }
+        popup.setOnMenuItemClickListener { item ->
+            when {
+                item.groupId == 1 -> {
+                    currentSpeed = SPEEDS[item.itemId - Menu.FIRST]
+                    currentEngine?.setSpeed(currentSpeed)
+                    Toast.makeText(this, "倍速 ${speedLabel(currentSpeed)}", Toast.LENGTH_SHORT).show()
+                    true
+                }
+                item.title.toString().startsWith("切换内核") -> {
+                    switchCore(); true
+                }
+                item.title.toString() == "刷新重试" -> {
+                    startEngine(currentType); true
+                }
+                else -> false
+            }
+        }
+        popup.show()
+    }
+
+    private fun speedLabel(s: Float): String =
+        if (s == 1.0f) "1.0 倍（正常）" else "${s} 倍"
+
+    private fun coreName(t: PlayerCoreType): String = when (t) {
+        PlayerCoreType.EXO -> "ExoPlayer"
+        PlayerCoreType.MPV -> "mpv"
+        PlayerCoreType.AUTO -> "Auto (Exo→mpv)"
     }
 
     private fun startEngine(type: PlayerCoreType) {
@@ -160,17 +221,9 @@ class PlayerActivity : AppCompatActivity(), PlayerEngine.PlayerListener {
             }
         }
 
-        updateCoreLabel(type)
-        engine.play(finalUrl)
-    }
-
-    private fun updateCoreLabel(type: PlayerCoreType) {
-        val name = when (type) {
-            PlayerCoreType.EXO -> "ExoPlayer"
-            PlayerCoreType.MPV -> "mpv"
-            PlayerCoreType.AUTO -> "Auto (Exo→mpv)"
-        }
-        coreLabel?.text = "内核: $name"
+        engine.play(finalUrl, headers)
+        engine.setSpeed(currentSpeed)
+        titleView?.text = "$titleText · ${coreName(type)}"
     }
 
     private fun switchCore() {

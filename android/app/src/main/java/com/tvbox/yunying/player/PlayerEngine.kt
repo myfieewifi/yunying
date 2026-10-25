@@ -31,6 +31,9 @@ interface PlayerEngine {
     fun seekTo(positionMs: Long)
     fun release()
 
+    /** 播放倍速（默认内核不支持时为空实现） */
+    fun setSpeed(speed: Float) {}
+
     fun isPlaying(): Boolean
     fun getCurrentPosition(): Long
     fun getDuration(): Long

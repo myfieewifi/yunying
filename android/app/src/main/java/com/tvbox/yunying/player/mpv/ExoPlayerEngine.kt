@@ -90,6 +90,10 @@ class ExoPlayerEngine(private val context: Context) : PlayerEngine {
     override fun play() { exoPlayer?.playWhenReady = true }
     override fun pause() { exoPlayer?.playWhenReady = false }
 
+    override fun setSpeed(speed: Float) {
+        exoPlayer?.setPlaybackSpeed(speed)
+    }
+
     override fun seekTo(positionMs: Long) {
         exoPlayer?.seekTo(positionMs)
     }

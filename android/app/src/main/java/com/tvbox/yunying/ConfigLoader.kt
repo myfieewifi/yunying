@@ -28,8 +28,19 @@ object ConfigLoader {
         if (url.isNullOrBlank()) return@withContext default(context)
         val text = when {
             url.startsWith("http://") || url.startsWith("https://") -> {
-                val req = Request.Builder().url(url).header("User-Agent", "Mozilla/5.0").build()
-                http.newCall(req).execute().use { it.body?.string().orEmpty() }
+                // 部分订阅站按 UA 拦截（如 摸鱼儿 要求 okhttp/3.12.0），依次尝试常见 UA
+                val agents = listOf("okhttp/3.12.0", "Mozilla/5.0", "okhttp/4.12.0", "pluto-sdk/1.0")
+                var text: String? = null
+                for (ua in agents) {
+                    val req = Request.Builder().url(url).header("User-Agent", ua).build()
+                    runCatching {
+                        http.newCall(req).execute().use { resp ->
+                            if (resp.isSuccessful) text = resp.body?.string().orEmpty()
+                        }
+                    }
+                    if (!text.isNullOrBlank()) break
+                }
+                text ?: throw IllegalStateException("配置下载失败（已尝试多种 UA）: $url")
             }
             url.startsWith("file://") -> File(url.removePrefix("file://")).readText()
             url.startsWith("assets://") ->

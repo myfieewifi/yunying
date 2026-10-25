@@ -77,6 +77,20 @@ def patch_text(rel, old, new, label):
     print(f'  patched {rel}: {label}')
 
 
+def patch_all(rel, old, new, label):
+    """同 patch_text，但替换所有出现。"""
+    p = SRC / rel
+    if not p.exists():
+        warnings.append(f'missing {rel}')
+        return
+    s = p.read_text(encoding='utf-8')
+    if old not in s:
+        warnings.append(f'"{label}" pattern not found in {rel}')
+        return
+    p.write_text(s.replace(old, new), encoding='utf-8')
+    print(f'  patched {rel}: {label} (all)')
+
+
 IOS_STRUCT_SCROLLSTRIP = '''/// iOS 16 简化版（YunYing 补丁）：没有 ScrollPosition/onScrollGeometryChange 这些 iOS 18 API。
 /// 保留横滑与外部 scrollTo 定位；边界渐隐与 Mac 拖拽由 #else 分支的原 iOS 17+ 实现承担。
 struct ScrollStrip<Content: View>: View {
@@ -608,9 +622,23 @@ extension EnvironmentValues {
 
 def product_renames():
     """云映产品化：所有 .strings 与 project.yml 里的 映匣/Yingxia 显示名 → 云映。"""
+    import re as _re
     for path in sorted(SRC.rglob('*.strings')):
         s = path.read_text(encoding='utf-8')
-        new = s.replace('映匣', '云映').replace('"Yingxia"', '"云映"')
+        new = s.replace('映匣', '云映')
+        # InfoPlist：CFBundleDisplayName/CFBundleName 的值（en 是 "Yingxia"）
+        new = _re.sub(r'"(CFBundleDisplayName|CFBundleName)"(\s*=\s*)"[^"]*"', r'"\1"\2"云映"', new)
+        # Localizable：键 "Yingxia"（App 名）的值 → 云映（只动值，不动键）
+        new = _re.sub(r'"Yingxia"(\s*=\s*)"[^"]*"', r'"Yingxia"\1"云映"', new)
+        # en 句子里的产品名（值一侧）Yingxia → YunYing（键保持不变以匹配代码查找）
+        if '\\en.lproj\\' in str(path) or '/en.lproj/' in str(path):
+            lines = []
+            for ln in new.splitlines():
+                m = _re.match(r'^("[^"]+")(\s*=\s*)(.*)$', ln)
+                if m and 'Yingxia' in m.group(3):
+                    ln = m.group(1) + m.group(2) + m.group(3).replace('Yingxia', 'YunYing')
+                lines.append(ln)
+            new = '\n'.join(lines) + ('\n' if new.endswith('\n') else '')
         if new != s:
             path.write_text(new, encoding='utf-8')
             print(f'  renamed display-name in {path.relative_to(SRC)}')
@@ -715,6 +743,164 @@ def product_patches():
 ''',
                '',
                'tvOS Send Feedback section removed')
+
+    # 8) 版权信息：Brand.copyright 改为云映自有署名；LicensesView 头部与原站链接清除
+    patch_text('App/GlassKit.swift',
+               '    static let copyright = "© 2026 getmegaportal.com"',
+               '    static let copyright = "© 2026 云映"',
+               'Brand.copyright → 云映')
+    patch_all('App/SettingsView.swift',
+              '"Yingxia \\(Brand.copyright)"',
+              '"云映 \\(Brand.copyright)"',
+              'LicensesView header Yingxia → 云映')
+    patch_text('App/SettingsView.swift',
+               '                    Link("www.getmegaportal.com", destination: Brand.website).font(.subheadline)\n',
+               '',
+               'LicensesView upstream site link removed')
+    patch_text('Sources/TVCore/CatalogDanmaku.swift' if (SRC / 'Sources/TVCore/CatalogDanmaku.swift').exists() else 'App/CatalogDanmaku.swift',
+               'Yingxia (danmaku; https://www.getmegaportal.com)',
+               'YunYing (danmaku)',
+               'Danmaku User-Agent → YunYing')
+
+    # 9) 播放器控件收纳（腾讯/爱奇艺式右上角单菜单）——见 player_menu_patches()
+    player_menu_patches()
+
+
+def player_menu_patches():
+    """手机播放器：顶栏只留 返回/标题/投屏 + 右上角一个 ⋯ 菜单（选集/画质/画面/音轨/字幕/倍速/画中画/弹幕/旋转）。"""
+    # 1) 新增两个 sheet 状态（片头片尾设置、弹幕设置——原 CatalogPlaybackActions 的状态）
+    patch_text('App/MobilePlayer.swift',
+               '    @State private var showsDanmakuList = false\n',
+               '''    @State private var showsDanmakuList = false
+    // YunYing：剧集/弹幕设置的 sheet 状态（原属 CatalogPlaybackActions，现并入右上角菜单）
+    @State private var showsSkipIntro = false
+    @State private var showsCatalogDanmaku = false
+''',
+               'MobilePlayer sheet states')
+
+    # 2) 顶栏 toolbar 只留投屏（AirPlay/Play On），其余按钮全部收进 ⋯ 菜单
+    patch_text('App/MobilePlayer.swift',
+               '''            if pip.supported {
+                Button { pip.toggle() } label: {
+                    Image(systemName: pip.active ? "pip.exit" : "pip.enter").font(.headline).frame(width: 22, height: 22)
+                }
+                .chromeButton()
+                .disabled(!pip.possible && !pip.active)
+                .accessibilityLabel(L10n.text("Picture in Picture"))
+                .accessibilityIdentifier("player.pip")
+            }
+            CatalogPlaybackActions(channel: channel, session: session)
+            // One button for danmaku: show or hide them, or open the list.
+            if !session.danmaku.isEmpty {
+                Menu {
+                    Toggle(isOn: $showsDanmaku) { Label(L10n.text("Show Danmaku"), systemImage: "text.bubble") }
+                    Button { showsDanmakuList = true } label: { Label(L10n.text("Danmaku List"), systemImage: "list.bullet.rectangle") }
+                } label: {
+                    Image(systemName: showsDanmaku ? "text.bubble.fill" : "text.bubble").font(.headline).frame(width: 22, height: 22)
+                }
+                .chromeButton()
+                .accessibilityLabel(L10n.text("Danmaku"))
+            }
+            // Turns the picture even with Portrait Orientation Lock on, the way the system's own rotation can't.
+            // Only on a phone-sized screen: iPhone Duo's inner display (regular both ways) ignores orientations.
+            if PlayerOrientation.available, horizontalSizeClass == .compact || verticalSizeClass == .compact {
+                let landscape = verticalSizeClass == .compact
+                Button { PlayerOrientation.set(landscape: !landscape) } label: {
+                    Image(systemName: landscape ? "rectangle.portrait.rotate" : "rectangle.landscape.rotate").font(.headline).frame(width: 22, height: 22)
+                }
+                .chromeButton()
+                .accessibilityLabel(L10n.text(landscape ? "Rotate to Portrait" : "Rotate to Landscape"))
+                .accessibilityIdentifier("player.rotate")
+            }
+''',
+               '',
+               'MobilePlayer toolbar stripped to AirPlay')
+
+    # 3) optionsMenu 重写为唯一右上角菜单（腾讯/爱奇艺式分区下拉）
+    patch_text('App/MobilePlayer.swift',
+               '''    /// The picture, sound and subtitle settings in one menu: what AVKit's ⋯ menu held, and the stream's quality.
+    private var optionsMenu: some View {
+        Menu {
+            if session.qualities.count > 1 { Menu(L10n.text("Quality")) { QualityPicker(session: session) } }''',
+               '''    /// YunYing：腾讯/爱奇艺式右上角 ⋯ 菜单——选集、画质、画面、音轨、字幕、倍速与播放器开关全部收进这里。
+    private var optionsMenu: some View {
+        Menu {
+            if channel.historyContext != nil, let catalog = store.catalog(for: channel) {
+                Section(L10n.text("Episodes")) {
+                    Toggle(L10n.text("Auto-play next episode"), isOn: Binding(
+                        get: { store.autoPlayNext }, set: { store.autoPlayNext = $0 }))
+                    Menu(L10n.text("Episodes")) {
+                        ForEach(catalog.playlist.flags, id: \\.self) { flag in
+                            Menu(flag) {
+                                ForEach(catalog.playlist.episodes(for: flag)) { episode in
+                                    Button(episode.name) { store.selectEpisode(episode, from: channel) }
+                                }
+                            }
+                        }
+                    }
+                    .disabled(store.resolvingEpisode != nil)
+                    Toggle(L10n.text("Automatically skip intro and outro"), isOn: Binding(
+                        get: { session.skipSettings.enabled },
+                        set: { value in
+                            var settings = session.skipSettings
+                            settings.enabled = value
+                            session.applySkipSettings(settings)
+                        }))
+                    Button(L10n.text("Skip intro / outro")) { showsSkipIntro = true }
+                        .accessibilityIdentifier("player.skip")
+                    if channel.historyContext?.sourceKey != Bilibili.siteKey {
+                        Button(L10n.text("Danmaku")) { showsCatalogDanmaku = true }
+                            .accessibilityIdentifier("player.danmaku")
+                    }
+                    if let error = store.episodeError { Text(error) }
+                }
+            }
+            if session.qualities.count > 1 { Menu(L10n.text("Quality")) { QualityPicker(session: session) } }''',
+               'MobilePlayer optionsMenu episodes section')
+
+    patch_text('App/MobilePlayer.swift',
+               '''            Toggle(L10n.text("Fill Screen"), isOn: $fillsScreen)
+        } label: {
+            Image(systemName: "slider.horizontal.3").font(.headline).frame(width: 22, height: 22)
+                .symbolVariant(pictureSwitches && (upscalesVideo || smoothsVideo) ? .fill : .none)
+        }
+        .chromeButton()
+        // "Playback Options" is the catalog's episode menu beside it.
+        .accessibilityLabel(L10n.text("Settings"))
+        .accessibilityIdentifier("player.options")
+    }''',
+               '''            Section(L10n.text("Settings")) {
+                Toggle(L10n.text("Fill Screen"), isOn: $fillsScreen)
+                if pip.supported {
+                    Button {
+                        pip.toggle()
+                    } label: { Label(L10n.text("Picture in Picture"), systemImage: pip.active ? "pip.exit" : "pip.enter") }
+                    .disabled(!pip.possible && !pip.active)
+                }
+                if !session.danmaku.isEmpty {
+                    Toggle(isOn: $showsDanmaku) { Label(L10n.text("Show Danmaku"), systemImage: "text.bubble") }
+                    Button { showsDanmakuList = true } label: { Label(L10n.text("Danmaku List"), systemImage: "list.bullet.rectangle") }
+                }
+                if PlayerOrientation.available, horizontalSizeClass == .compact || verticalSizeClass == .compact {
+                    let landscape = verticalSizeClass == .compact
+                    Button { PlayerOrientation.set(landscape: !landscape) } label: {
+                        Label(L10n.text(landscape ? "Rotate to Portrait" : "Rotate to Landscape"),
+                              systemImage: landscape ? "rectangle.portrait.rotate" : "rectangle.landscape.rotate")
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle").font(.headline).frame(width: 22, height: 22)
+        }
+        .chromeButton()
+        .accessibilityLabel(L10n.text("Settings"))
+        .accessibilityIdentifier("player.options")
+        .sheet(isPresented: $showsSkipIntro) { EpisodeSkipSettingsView(session: session) }
+        .sheet(isPresented: $showsCatalogDanmaku) {
+            CatalogDanmakuSettingsView(model: session.catalogDanmaku, channelName: channel.name)
+        }
+    }''',
+               'MobilePlayer optionsMenu player section + sheets')
 
 
 def patch_project_yml():

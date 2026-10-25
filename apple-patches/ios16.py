@@ -919,7 +919,7 @@ def player_menu_patches():
                 .accessibilityLabel(L10n.text("Danmaku"))
             }
             if let legible = tracks.legible, !legible.options.isEmpty {
-                Menu(L10n.text("Subtitles")) {
+                Menu {
                     Picker(L10n.text("Subtitles"), selection: Binding(get: { tracks.selected(in: legible) }, set: { tracks.select($0, in: legible) })) {
                         if legible.group.allowsEmptySelection { Text(L10n.text("Off")).tag(AVMediaSelectionOption?.none) }
                         ForEach(legible.options, id: \\.self) { Text($0.displayName).tag(Optional($0)) }
@@ -936,7 +936,7 @@ def player_menu_patches():
                 .accessibilityLabel(L10n.text("Subtitles"))
             }
             if let audio = tracks.audio, audio.options.count > 1 {
-                Menu(L10n.text("Audio")) {
+                Menu {
                     Picker(L10n.text("Audio"), selection: Binding(get: { tracks.selected(in: audio) }, set: { tracks.select($0, in: audio) })) {
                         ForEach(audio.options, id: \\.self) { Text($0.displayName).tag(Optional($0)) }
                     }

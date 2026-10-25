@@ -605,6 +605,118 @@ extension EnvironmentValues {
 
     patch_scrollstrip()
 
+
+def product_renames():
+    """云映产品化：所有 .strings 与 project.yml 里的 映匣/Yingxia 显示名 → 云映。"""
+    for path in sorted(SRC.rglob('*.strings')):
+        s = path.read_text(encoding='utf-8')
+        new = s.replace('映匣', '云映').replace('"Yingxia"', '"云映"')
+        if new != s:
+            path.write_text(new, encoding='utf-8')
+            print(f'  renamed display-name in {path.relative_to(SRC)}')
+    py = SRC / 'project.yml'
+    if py.exists():
+        s = py.read_text(encoding='utf-8')
+        for old, new in (('INFOPLIST_KEY_CFBundleDisplayName: Yingxia', 'INFOPLIST_KEY_CFBundleDisplayName: 云映'),
+                         ('CFBundleDisplayName: Yingxia', 'CFBundleDisplayName: 云映')):
+            if old in s:
+                s = s.replace(old, new, 1)
+        py.write_text(s, encoding='utf-8')
+
+
+def product_versions():
+    """版本号初始化为 1.0（marketing 1.0.0 / build 1）。"""
+    py = SRC / 'project.yml'
+    if not py.exists():
+        warnings.append('product_versions: missing project.yml')
+        return
+    s = py.read_text(encoding='utf-8')
+    new = s.replace("MARKETING_VERSION: '1.7.13'", "MARKETING_VERSION: '1.0.0'", 1)
+    new = new.replace("CURRENT_PROJECT_VERSION: '32'", "CURRENT_PROJECT_VERSION: '1'", 1)
+    if new == s:
+        warnings.append("product_versions: MARKETING_VERSION/CURRENT_PROJECT_VERSION patterns not found")
+    py.write_text(new, encoding='utf-8')
+
+
+def product_patches():
+    """云映产品化补丁：改名、版本 1.0、关闭更新/新功能模块、删除问题反馈入口。"""
+    product_renames()
+    product_versions()
+
+    # 1) 强制更新渠道为 none：关闭自动更新检查、启动 What's New 弹窗、"New" 徽标
+    patch_text('App/Updates.swift',
+               '    static var channel: Channel { Distribution.isTestFlight ? .testFlight : Distribution.isAppStore ? .none : .direct }',
+               '    static var channel: Channel { .none } // YunYing product patch: 关闭更新检查/新功能弹窗',
+               'Updates channel → .none')
+
+    # 2) Mac：禁用 Sparkle（release 构建会静默下载上游映匣构建覆盖云映）
+    patch_text('App/MacUpdater.swift',
+               '        guard !Distribution.isAppStore else { return nil }',
+               '''        // YunYing product patch: 关闭 Sparkle 自动更新（上游 appcast 会拉回映匣构建）
+        return nil''',
+               'MacUpdater.make() → nil')
+
+    # 3) 删除 设置页 → 发送反馈（iOS/macOS Form 变体）
+    patch_text('App/SettingsView.swift',
+               '''            // Right under the app, so a problem or an idea is never more than one click away.
+            Section {
+                #if os(macOS)
+                SettingsLinkRow(symbol: "bubble.left.and.text.bubble.right.fill", tint: Brand.indigo, title: L10n.text("Send Feedback"),
+                                subtitle: L10n.text("Report a problem or share an idea")) { FeedbackView() }
+                #else
+                FormLink(symbol: "bubble.left.and.text.bubble.right.fill", tint: Brand.indigo, title: L10n.text("Send Feedback")) { FeedbackView() }
+                #endif
+            }
+''',
+               '',
+               'SettingsView Send Feedback section removed')
+
+    # 4) 删除 设置页 → What's New in Version（Form 变体）
+    patch_text('App/SettingsView.swift',
+               '''                if !updates.currentNotes.isEmpty {
+                    Button(action: updates.showCurrentNotes) {
+                        HStack(spacing: 8) {
+                            FormLabel(symbol: "sparkles", tint: .purple, title: L10n.text("What's New in Version %@", updates.displayVersion))
+                                .foregroundStyle(.primary).lineLimit(1)
+                            Spacer(minLength: 0)
+                            Image(systemName: "chevron.forward").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                        }
+                    }
+                    .tint(.primary)
+                }
+''',
+               '',
+               "SettingsView What's New (Form) removed")
+
+    # 5) 删除 设置页 → What's New in Version（macOS Settings 变体）
+    patch_text('App/SettingsView.swift',
+               '''                if !updates.currentNotes.isEmpty {
+                    Button(action: updates.showCurrentNotes) {
+                        FormLabel(symbol: "sparkles", tint: .purple, title: L10n.text("What's New in Version %@", updates.displayVersion))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }.formRowButton()
+                }
+''',
+               '',
+               "SettingsView What's New (macOS) removed")
+
+    # 6) 删除 tvOS 设置 → 软件更新 Section 入口（含 Check Now / What's New）
+    patch_text('App/SettingsView.swift',
+               '            if !updates.available.isEmpty { updateSection }\n',
+               '',
+               'tvOS updateSection entry removed')
+
+    # 7) 删除 tvOS 设置 → 发送反馈 Section
+    patch_text('App/SettingsView.swift',
+               '''            // First in the list, beside the app: a problem or an idea is one press away.
+            TVSettingsSection {
+                TVSettingsLink(title: L10n.text("Send Feedback")) { FeedbackView() }
+            }
+''',
+               '',
+               'tvOS Send Feedback section removed')
+
+
 def patch_project_yml():
     p = SRC / 'project.yml'
     if not p.exists():
@@ -640,12 +752,14 @@ def main():
     if not SRC.exists():
         print(f'!! 未找到 {SRC}')
         sys.exit(1)
-    print('▶ 1/4 manual & structural patches')
+    print('▶ 1/5 manual & structural patches')
     manual_patches()
-    print('▶ 2/4 project.yml deployment target')
+    print('▶ 2/5 product patches (云映改名/1.0/删模块)')
+    product_patches()
+    print('▶ 3/5 project.yml deployment target')
     patch_project_yml()
     patch_package_swift()
-    print('▶ 3/4 collect @Observable class names')
+    print('▶ 4/5 collect @Observable class names')
     Searching = [SRC / 'App', SRC / 'Sources' / 'TvCore' if (SRC / 'Sources' / 'TvCore').exists() else SRC / 'Sources' / 'TVCore']
     for path in walk([SRC / 'App', SRC / 'Sources' / 'TVCore']):
         text = path.read_text(encoding='utf-8')
@@ -656,7 +770,7 @@ def main():
             if m.group(1) not in converted:
                 converted.append(m.group(1))
     print(f'   converted classes ({len(converted)}): {", ".join(converted)}')
-    print('▶ 4/4 per-file transform')
+    print('▶ 5/5 per-file transform')
     for path in walk([SRC / 'App', SRC / 'Sources' / 'TVCore']):
         try:
             process_file(path)

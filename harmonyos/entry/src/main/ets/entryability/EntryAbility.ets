@@ -14,7 +14,7 @@ export default class EntryAbility extends UIAbility {
   onDestroy(): void {
   }
 
-  onWindowStageCreate(windowStage: window.Window): void {
+  onWindowStageCreate(windowStage: window.WindowStage): void {
     windowStage.loadContent('pages/Index', (err: BusinessError) => {
       if (err.code) {
         console.error(`loadContent failed: ${err.code} ${err.message}`);

@@ -147,6 +147,34 @@ def spring_map(text):
     return re.sub(r'\.spring\(duration: ([\d.]+)(?:, bounce: ([\d.]+))?\)', one, text)
 
 
+def rewrite_zero_param_onchange(text):
+    """iOS17 的 onChange(of:_:) 有零参数闭包形态；iOS16 只有 onChange(of:perform:)（单参）。
+    把零参数闭包 `）{ body }` 改写为 `）{ _, _ in body }`，匹配 shims 里的双参数实现。
+    闭包体含 ` in`（iOS16 的两参/单参源码形态）则保持原样。"""
+    pattern = re.compile(r'(\.onChange\(of: [^{}\n]*?\)\s*)\{([^{}]*)\}')
+
+    def repl(m):
+        head, body = m.group(1), m.group(2)
+        if re.search(r'\bin\b', body):
+            return m.group(0)
+        stripped = re.sub(r'\s+', ' ', body.strip())
+        return f'{head}{{ _, _ in {stripped} }}' if stripped else f'{head}{{ _, _ in }}'
+
+    return pattern.sub(repl, text)
+
+
+def numeric_text_downgrade(text):
+    """numericText(value:) 需要 iOS 17；iOS 16 用无值形态 numericText。"""
+    return re.sub(r'\.numericText\(value:\s*[^()]+?\)', '.numericText', text)
+
+
+def symbol_effect_downgrade(text):
+    """symbolEffect 需要 iOS 17；已知的两处调用点直接删除修饰符（仅视觉动画损失）。
+    GlassKit breathingSymbol 由 manual_patches 单独处理（保留 if #available 分支）。"""
+    text = re.sub(r'\.symbolEffect\(\.bounce,\s*value:\s*[A-Za-z0-9_.]+?\)', '', text)
+    return text.replace('.symbolEffect(.variableColor.iterative)', '')
+
+
 def balanced_delete(text, name):
     token = '.' + name + '('
     while True:
@@ -344,6 +372,9 @@ def process_file(path):
     text = re.sub(r'\.smooth\(', '.easeInOut(', text)
     text = spring_map(text)
     text = text.replace('.contentTransition(.symbolEffect(.replace))', '')
+    text = numeric_text_downgrade(text)
+    text = symbol_effect_downgrade(text)
+    text = rewrite_zero_param_onchange(text)
     # 平衡删除
     for name in ('scrollIndicators', 'scrollTargetLayout', 'sensoryFeedback'):
         text = balanced_delete(text, name)
@@ -449,6 +480,34 @@ extension EnvironmentValues {
                '''        } else {
             self // YunYing iOS16 补丁：symbolEffect 需要 iOS 17+，退化为静态图标
         }''', 'breathingSymbol')
+
+    patch_text('App/GlassKit.swift',
+               '''        let environment = EnvironmentValues()
+        let from = resolve(in: environment), to = other.resolve(in: environment)
+        // Resolved components are linear; blending gamma-encoded values looks closer to mix's perceptual default.
+        func encoded(_ linear: Float) -> Double { Double(pow(max(0, linear), 1 / 2.2)) }
+        func mixed(_ a: Float, _ b: Float) -> Double { encoded(a) + (encoded(b) - encoded(a)) * fraction }
+        return Color(.sRGB, red: mixed(from.red, to.red), green: mixed(from.green, to.green), blue: mixed(from.blue, to.blue),
+                     opacity: Double(from.opacity + (to.opacity - from.opacity) * Float(fraction)))''',
+               '''        // YunYing iOS16 补丁：Color.Resolved 是 iOS17+，iOS16 用 UIColor 提取分量混色（其他平台保留 resolve）
+        #if os(iOS)
+        let frac = CGFloat(fraction)
+        var rf = CGFloat(0), gf = CGFloat(0), bf = CGFloat(0), af = CGFloat(0)
+        UIColor(self).getRed(&rf, green: &gf, blue: &bf, alpha: &af)
+        var rr = CGFloat(0), rg = CGFloat(0), rb = CGFloat(0), ra = CGFloat(0)
+        UIColor(other).getRed(&rr, green: &rg, blue: &rb, alpha: &ra)
+        func blendMix(_ a: CGFloat, _ b: CGFloat) -> CGFloat { a + (b - a) * frac }
+        return Color(.sRGB, red: Double(blendMix(rf, rr)), green: Double(blendMix(gf, rg)), blue: Double(blendMix(bf, rb)),
+                     opacity: Double(blendMix(af, ra)))
+        #else
+        let environment = EnvironmentValues()
+        let from = resolve(in: environment), to = other.resolve(in: environment)
+        // Resolved components are linear; blending gamma-encoded values looks closer to mix's perceptual default.
+        func encoded(_ linear: Float) -> Double { Double(pow(max(0, linear), 1 / 2.2)) }
+        func mixed(_ a: Float, _ b: Float) -> Double { encoded(a) + (encoded(b) - encoded(a)) * fraction }
+        return Color(.sRGB, red: mixed(from.red, to.red), green: mixed(from.green, to.green), blue: mixed(from.blue, to.blue),
+                     opacity: Double(from.opacity + (to.opacity - from.opacity) * Float(fraction)))
+        #endif''', 'GlassKit blend UIColor path')
 
     patch_text('App/HomeView.swift',
                '        .containerRelativeFrame(.vertical, alignment: .center) { height, _ in height * 0.82 }',

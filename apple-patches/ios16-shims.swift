@@ -22,6 +22,7 @@ import AppKit
 //   let _yyBstore = YyBind(store)
 // 之后 `$store.section` 会变为 `_yyBstore.section`（动态成员 → Binding）。
 // 三平台 unconditional 使用的辅助（GlassKit 的 else 分支在 tvOS/macOS 也走这里）：
+@dynamicMemberLookup
 struct YyBind<M: ObservableObject> {
     private let model: M
     init(_ model: M) { self.model = model }
@@ -307,4 +308,20 @@ extension View {
                                         action: @escaping (T) -> Void) -> some View {
         modifier(YyGeometryProbe(transform: transform, action: action))
     }
+}
+
+// MARK: - iOS 16.4 才开的 presentationBackground / presentationCornerRadius 垫片
+// iOS16 目标用本垫片；tvOS17/macOS15 目标走 SDK 原版（iOS 可用性在此平台从不满足）。
+extension View {
+    /// iOS 16.0 上保留系统默认面板底色（毛玻璃效果降级为无垫底）。
+    @available(iOS 16.0, *)
+    func presentationBackground<S: ShapeStyle>(_ background: S) -> some View { self }
+
+    /// iOS 16.0 上保留系统默认面板底色，不渲染自定义背景视图。
+    @available(iOS 16.0, *)
+    func presentationBackground<C: View>(alignment: Alignment = .center, @ViewBuilder content: () -> C) -> some View { self }
+
+    /// iOS 16.0 上使用系统默认圆角。
+    @available(iOS 16.0, *)
+    func presentationCornerRadius(_ radius: CGFloat?) -> some View { self }
 }

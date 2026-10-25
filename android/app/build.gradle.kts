@@ -107,7 +107,7 @@ dependencies {
     implementation(fileTree("libs") { include("libmpv*.aar") })
 
     // HTML 解析（爬虫常用）
-    implementation("org.jsoup:jsoup:1.17.2")
+    implementation("org.jsoup:jsoup:1.21.1")  // 与 :quickjs 一致，HtmlQuery 用到 1.21 的 Selector.evaluatorOf
 
     // CatVod 宿主运行时（FongMi GPL-3 vendored）：jar 爬虫协议支持
     implementation(project(":catvod"))

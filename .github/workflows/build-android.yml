@@ -32,6 +32,16 @@ jobs:
       - name: Download libmpv AAR
         run: bash android/scripts/download-mpv.sh
 
+      # okhttp-android 5.4.0 要求 compileSdk 36；runner 预装若无 android-36 则显式补装（找不到时容忍，Gradle 报错更可读）
+      - name: Ensure Android SDK platform 36
+        run: |
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses > /dev/null 2>&1 || true
+          "$SDKM" --list 2>/dev/null | grep -o 'platforms;android-36' || true
+          ls "$ANDROID_HOME/platforms"
+          "$SDKM" --install "platforms;android-36" 2>&1 || true
+          ls "$ANDROID_HOME/platforms" || true
+
       - name: Build APK (Release)
         working-directory: android
         run: |

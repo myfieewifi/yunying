@@ -54,6 +54,15 @@ android {
     buildFeatures { compose = true }
     // composeOptions 已废除（Kotlin 2.x 内置 Compose 编译器）
 
+    // okhttp 5.x 等依赖各自携带 OSGi 元数据，打包时去重（YunYing）
+    packaging {
+        resources {
+            excludes += setOf(
+                "META-INF/versions/9/OSGI-INF/MANIFEST.MF",
+            )
+        }
+    }
+
     // vendored GPL 模块里有些 API 版本断言与本项目 minSdk=21 有出入，避免 lint 卡发布构建
     lint {
         checkReleaseBuilds = false

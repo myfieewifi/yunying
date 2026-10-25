@@ -32,6 +32,15 @@ jobs:
       - name: Download libmpv AAR
         run: bash android/scripts/download-mpv.sh
 
+      # AGP 8.5.2 不会自动补装 compileSdk 37 的平台包（okhttp-android 5.5.0 元数据硬性要求），
+      # runner 预装 SDK 只到 android-3x 旧版，显式安装一次
+      - name: Install Android SDK platform 37
+        run: |
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses > /dev/null 2>&1 || true
+          "$SDKM" --install "platforms;android-37" > /dev/null
+          ls "$ANDROID_HOME/platforms" | grep -i 37
+
       - name: Build APK (Release)
         working-directory: android
         run: |

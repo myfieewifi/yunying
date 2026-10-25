@@ -109,7 +109,9 @@ private struct YyOnChangeSync<V: Equatable>: ViewModifier {
 private struct YyOnChangeAsync<V: Equatable>: ViewModifier {
     let value: V
     let initial: Bool
-    let action: (V, V) async -> Void
+    // Swift 6 严格并发：V 可能是 MainActor 隔离的非 Sendable 类型，
+    // 回调标 @MainActor 后同在主 actor 内调用，无需跨隔离发送
+    let action: @MainActor (V, V) async -> Void
     @State private var last: V?
 
     func body(content: Content) -> some View {
@@ -133,7 +135,7 @@ extension View {
     }
 
     @available(iOS 16.0, *)
-    func onChange<V: Equatable>(of value: V, initial: Bool = false, _ action: @escaping (V, V) async -> Void) -> some View {
+    func onChange<V: Equatable>(of value: V, initial: Bool = false, _ action: @escaping @MainActor (V, V) async -> Void) -> some View {
         modifier(YyOnChangeAsync(value: value, initial: initial, action: action))
     }
 
@@ -144,7 +146,7 @@ extension View {
     }
 
     @available(iOS 16.0, *)
-    func onChange<V: Equatable>(of value: V, initial: Bool = false, _ action: @escaping () async -> Void) -> some View {
+    func onChange<V: Equatable>(of value: V, initial: Bool = false, _ action: @escaping @MainActor () async -> Void) -> some View {
         modifier(YyOnChangeAsync(value: value, initial: initial, action: { _, _ in await action() }))
     }
 }
@@ -152,12 +154,20 @@ extension View {
 
 // MARK: - withAnimation(_:completion:_:)（iOS 17 动画完成回调）的近似实现（iOS16 专用，见上）
 #if os(iOS)
+// completion 通常捕获 MainActor 状态，天然非 Sendable；用 @unchecked Sendable 盒子
+// 显式承诺时序上的安全（回调投递到主队列，实际仍是主 actor 串行执行）
+final class YySendableClosure: @unchecked Sendable {
+    let run: () -> Void
+    init(_ run: @escaping () -> Void) { self.run = run }
+}
+
 @available(iOS 16.0, *)
 func withAnimation<Result>(_ animation: Animation?, completion: @escaping () -> Void, _ body: () -> Result) -> Result {
     let value = withAnimation(animation) { body() }
     // 没有完成回调钩子：用动画时长 + 余量的延迟近似时序
     let delay = animation == nil ? 0.35 : 0.45
-    DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: completion)
+    let box = YySendableClosure(completion)
+    DispatchQueue.main.asyncAfter(deadline: .now() + delay) { box.run() }
     return value
 }
 #endif

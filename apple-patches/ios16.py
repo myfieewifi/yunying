@@ -776,6 +776,10 @@ def player_menu_patches():
     // YunYing：剧集/弹幕设置的 sheet 状态（原属 CatalogPlaybackActions，现放底部控制条）
     @State private var showsSkipIntro = false
     @State private var showsCatalogDanmaku = false
+    // YunYing：选集/倍速半屏面板状态（选集直接弹面板，不再走层级 Menu）
+    @State private var showsEpisodePicker = false
+    @State private var showsSpeedPicker = false
+    @State private var pickerFlag = ""
 ''',
                'MobilePlayer sheet states')
 
@@ -839,23 +843,7 @@ def player_menu_patches():
     private var bottomActions: some View {
         HStack(spacing: 14) {
             if channel.historyContext != nil, let catalog = store.catalog(for: channel) {
-                Menu {
-                    Toggle(L10n.text("Auto-play next episode"), isOn: Binding(
-                        get: { store.autoPlayNext }, set: { store.autoPlayNext = $0 }))
-                    Menu(L10n.text("Episodes")) {
-                        ForEach(catalog.playlist.flags, id: \\.self) { flag in
-                            Menu(flag) {
-                                ForEach(catalog.playlist.episodes(for: flag)) { episode in
-                                    Button(episode.name) { store.selectEpisode(episode, from: channel) }
-                                }
-                            }
-                        }
-                    }
-                    .disabled(store.resolvingEpisode != nil)
-                    Button(L10n.text("Skip intro / outro")) { showsSkipIntro = true }
-                        .accessibilityIdentifier("player.skip")
-                    if let error = store.episodeError { Text(error) }
-                } label: {
+                Button { showsEpisodePicker = true } label: {
                     VStack(spacing: 3) {
                         Image(systemName: "list.bullet").font(.headline)
                         Text(L10n.text("Episodes")).font(.caption2).lineLimit(1).minimumScaleFactor(0.6)
@@ -866,12 +854,7 @@ def player_menu_patches():
                 .accessibilityLabel(L10n.text("Episodes"))
             }
             if !session.isLive {
-                Menu {
-                    Picker(L10n.text("Playback Speed"), selection: Binding(get: { speed }, set: { speed = $0; session.setSpeed($0) })) {
-                        ForEach(Self.speeds, id: \\.self) { Text(Self.speedLabel($0)).tag($0) }
-                    }
-                    .pickerStyle(.inline)
-                } label: {
+                Button { showsSpeedPicker = true } label: {
                     VStack(spacing: 3) {
                         Text(Self.speedLabel(speed)).font(.subheadline.weight(.semibold)).monospacedDigit()
                         Text(L10n.text("Playback Speed")).font(.caption2).lineLimit(1).minimumScaleFactor(0.6)
@@ -991,6 +974,104 @@ def player_menu_patches():
         .sheet(isPresented: $showsSkipIntro) { EpisodeSkipSettingsView(session: session) }
         .sheet(isPresented: $showsCatalogDanmaku) {
             CatalogDanmakuSettingsView(model: session.catalogDanmaku, channelName: channel.name)
+        }
+        .sheet(isPresented: $showsEpisodePicker) {
+            // YunYing：选集半屏面板——线路横滑 + 集数网格，当前集高亮（腾讯视频式），不再走层级 Menu
+            NavigationStack {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        if let catalog = store.catalog(for: channel) {
+                            Toggle(L10n.text("Auto-play next episode"), isOn: Binding(
+                                get: { store.autoPlayNext }, set: { store.autoPlayNext = $0 }))
+                                .font(.subheadline)
+                            Button(L10n.text("Skip intro / outro")) {
+                                // sheet 内不能再弹 sheet：先收起选集面板，稍候弹片头片尾设置
+                                showsEpisodePicker = false
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { showsSkipIntro = true }
+                            }
+                                .font(.subheadline)
+                                .accessibilityIdentifier("player.skip")
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 8) {
+                                    ForEach(catalog.playlist.flags, id: \\.self) { flag in
+                                        Button {
+                                            pickerFlag = flag
+                                        } label: {
+                                            Text(flag.isEmpty ? L10n.text("Episodes") : flag)
+                                                .font(.footnote.weight(pickerFlag == flag ? .semibold : .regular))
+                                                .padding(.horizontal, 12).padding(.vertical, 6)
+                                                .background(Capsule().fill(pickerFlag == flag ? Color.accentColor.opacity(0.2) : Color.secondary.opacity(0.12)))
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                            }
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 64), spacing: 8)], spacing: 8) {
+                                ForEach(catalog.playlist.episodes(for: pickerFlag)) { episode in
+                                    let current = channel.historyContext
+                                    let isCurrent = current?.episodeFlag == episode.flag && current?.episodeName == episode.name
+                                    Button {
+                                        store.selectEpisode(episode, from: channel)
+                                        showsEpisodePicker = false
+                                    } label: {
+                                        Text(episode.name)
+                                            .font(.footnote)
+                                            .lineLimit(1).minimumScaleFactor(0.7)
+                                            .frame(maxWidth: .infinity, minHeight: 34)
+                                            .background(RoundedRectangle(cornerRadius: 8).fill(isCurrent ? Color.accentColor.opacity(0.22) : Color.secondary.opacity(0.1)))
+                                            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(isCurrent ? Color.accentColor : Color.clear, lineWidth: 1.5))
+                                    }
+                                    .buttonStyle(.plain)
+                                    .disabled(store.resolvingEpisode != nil)
+                                }
+                            }
+                            if store.resolvingEpisode != nil {
+                                ProgressView().controlSize(.small)
+                            }
+                        }
+                        if let error = store.episodeError { Text(error).font(.footnote).foregroundStyle(.red) }
+                    }
+                    .padding()
+                }
+                .navigationTitle(L10n.text("Episodes"))
+                .navigationBarTitleDisplayMode(.inline)
+            }
+            .onAppear {
+                if pickerFlag.isEmpty {
+                    pickerFlag = channel.historyContext?.episodeFlag
+                        ?? store.catalog(for: channel)?.playlist.flags.first
+                        ?? ""
+                }
+            }
+            .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $showsSpeedPicker) {
+            // YunYing：倍速快捷条——横滑一排倍速胶囊，点选即生效
+            VStack(spacing: 16) {
+                Text(L10n.text("Playback Speed")).font(.headline)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(Self.speeds, id: \\.self) { s in
+                            Button {
+                                speed = s
+                                session.setSpeed(s)
+                                showsSpeedPicker = false
+                            } label: {
+                                Text(Self.speedLabel(s))
+                                    .font(.subheadline.weight(speed == s ? .semibold : .regular))
+                                    .monospacedDigit()
+                                    .padding(.horizontal, 16).padding(.vertical, 8)
+                                    .background(Capsule().fill(speed == s ? Color.accentColor.opacity(0.2) : Color.secondary.opacity(0.12)))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .padding(.horizontal)
+            }
+            .padding(.vertical, 20)
+            .frame(maxWidth: .infinity)
+            .presentationDetents([.fraction(0.22)])
         }
     }
 

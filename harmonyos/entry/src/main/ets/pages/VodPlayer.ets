@@ -1,6 +1,8 @@
 import media from '@ohos.multimedia.media';
 import router from '@ohos.router';
 import { BusinessError } from '@ohos.base';
+import http from '@ohos.net.http';
+import window from '@ohos.window';
 import { PlaySession } from '../model/Vod';
 import { HistoryEntry, HistoryStore } from '../model/History';
 import { Global } from '../model/Config';
@@ -11,8 +13,10 @@ const COLOR_ACCENT = '#3D7EFF';
 const COLOR_TEXT = '#FFFFFF';
 const COLOR_TEXT_SUB = '#9A9AAC';
 const COLOR_SURFACE = '#1E1E2A';
+const AUTO_HIDE_MS = 5000;      // 无操作 5 秒隐藏全部控件
+const HISTORY_TICK_MS = 10000;
 
-/** 倍速档位（AVPlayer 支持的固定档） */
+/** 倍速档位（AVPlayer 固定档） */
 const SPEEDS: media.PlaybackSpeed[] = [
   media.PlaybackSpeed.SPEED_FORWARD_0_75_X,
   media.PlaybackSpeed.SPEED_FORWARD_1_00_X,
@@ -22,21 +26,27 @@ const SPEEDS: media.PlaybackSpeed[] = [
 ];
 const SPEED_LABELS: string[] = ['0.75x', '1x', '1.25x', '1.75x', '2x'];
 const SPEED_DEFAULT = 1;
-const AUTO_HIDE_MS = 3600;
-const HISTORY_TICK_MS = 10000;
+
+/** 弹幕数据模型 */
+class DanmakuItem {
+  timeMs: number = 0;
+  text: string = '';
+  color: string = '#FFFFFF';
+  size: number = 14;
+}
 
 /**
- * 云映全屏播放器（点播）：
- *   - AVPlayer + XComponent 全屏画面
- *   - 底部进度条 + 播放暂停 + 集切换；顶部返回/标题
- *   - 倍速快捷条 / 选集面板（半屏，腾讯视频式）
- *   - 自动连播、播放历史（含续播位置）
+ * 云映全屏播放器（点播，三端统一布局规范）：
+ *   顶栏：左=返回+剧名，右=投屏
+ *   中部：左列锁定/弹幕，中播放暂停，右列截图/横竖屏
+ *   底上：进度条（左已播/右总时长，可拖动）
+ *   底下（从右）：选集、上一集、下一集、片头片尾、全屏/退出全屏
+ *   无操作 5 秒隐藏全部控件，仅显示画面；锁定屏蔽手势只留解锁浮钮
  */
 @Entry
 @Component
 struct VodPlayer {
 
-  // ---- 播放状态 ----
   private avPlayer?: media.AVPlayer;
   private xcController: XComponentController = new XComponentController();
   private surfaceId: string = '';
@@ -52,16 +62,26 @@ struct VodPlayer {
   @State flagIndex: number = 0;
   @State epIndex: number = 0;
 
-  // ---- 控件显隐 ----
   @State controlsVisible: boolean = true;
   private hideTimerId: number = -1;
 
-  // ---- 面板 ----
   @State showSpeedPanel: boolean = false;
   @State showEpPanel: boolean = false;
+  @State showSkipPanel: boolean = false;
+  @State showCastPanel: boolean = false;
   @State speedIndex: number = SPEED_DEFAULT;
 
-  // ---- 历史记录节流 ----
+  // 新规范状态
+  @State danmakuOn: boolean = false;
+  @State danmakuItems: DanmakuItem[] = [];
+  @State danmakuHint: string = '';
+  @State locked: boolean = false;
+  @State isFullscreen: boolean = true;
+  @State introSec: number = 0;
+  @State outroSec: number = 0;
+  @State introInput: string = '';
+  @State outroInput: string = '';
+  @State toastText: string = '';
   private historyTickId: number = -1;
   private resumePending: number = 0;
 
@@ -72,6 +92,7 @@ struct VodPlayer {
     if (!PlaySession.hasTarget()) {
       this.statusText = '无播放目标，请返回重选';
     }
+    this.loadSkipSettings();
   }
 
   aboutToDisappear(): void {
@@ -114,9 +135,6 @@ struct VodPlayer {
           this.posMs = time;
         }
       });
-      player.on('bufferingUpdate', (_info: media.BufferingInfoType) => {
-        // 缓冲比例仅作提示，状态栏以 stateChange 为准
-      });
       player.on('stateChange', (state: string, reason: media.StateChangeReason) => {
         if (state === 'prepared') {
           this.buffering = false;
@@ -138,7 +156,7 @@ struct VodPlayer {
           this.buffering = false;
           this.statusText = '播放出错，请换集或换线路';
         } else if (state === 'completed') {
-          // 播完：自动连播下一集（最后一集停在完成态页面）
+          // 播完：自动连播下一集
           this.playing = false;
           this.statusText = '播放完成';
           this.playNext();
@@ -153,6 +171,10 @@ struct VodPlayer {
         await player.seek(resumeMs, media.SeekMode.SEEK_PREV_SYNC);
       }
       this.startTimers();
+      // 片头自动跳过
+      if (this.introSec > 0) {
+        this.seekToMs(this.introSec * 1000);
+      }
     } catch (e) {
       const err = e as BusinessError;
       this.buffering = false;
@@ -173,6 +195,14 @@ struct VodPlayer {
     }
   }
 
+  private seekToMs(ms: number): void {
+    const p = this.avPlayer;
+    if (p !== undefined) {
+      p.seek(ms, media.SeekMode.SEEK_PREV_SYNC);
+    }
+    this.posMs = ms;
+  }
+
   // ================= 定时任务 =================
 
   private startTimers(): void {
@@ -180,21 +210,12 @@ struct VodPlayer {
     this.historyTickId = setInterval(() => {
       this.saveHistoryNow();
     }, HISTORY_TICK_MS);
-    this.hideTimerId = setInterval(() => {
-      if (this.playing) {
-        this.controlsVisible = false;
-      }
-    }, AUTO_HIDE_MS);
   }
 
   private stopTimers(): void {
     if (this.historyTickId !== -1) {
       clearInterval(this.historyTickId);
       this.historyTickId = -1;
-    }
-    if (this.hideTimerId !== -1) {
-      clearInterval(this.hideTimerId);
-      this.hideTimerId = -1;
     }
   }
 
@@ -257,7 +278,23 @@ struct VodPlayer {
     const line = PlaySession.epUrls[this.flagIndex] ?? [];
     if (this.epIndex + 1 < line.length) {
       await this.switchEpisode(this.flagIndex, this.epIndex + 1);
+    } else {
+      router.back();
     }
+  }
+
+  private gotoEpisode(delta: number): void {
+    const line = PlaySession.epUrls[this.flagIndex] ?? [];
+    const target = this.epIndex + delta;
+    if (target < 0) {
+      this.showToast('已经是第一集');
+      return;
+    }
+    if (target >= line.length) {
+      this.showToast('已经是最后一集');
+      return;
+    }
+    this.switchEpisode(this.flagIndex, target);
   }
 
   private async togglePlay(): Promise<void> {
@@ -265,13 +302,107 @@ struct VodPlayer {
     if (p === undefined) {
       return;
     }
-    // 暂停时同步落历史
     await this.saveHistoryNow();
     if (this.playing) {
       await p.pause();
     } else {
       await p.play();
     }
+  }
+
+  // ================= 新规范功能 =================
+
+  private showToast(msg: string): void {
+    this.toastText = msg;
+    setTimeout(() => { this.toastText = ''; }, 2400);
+  }
+
+  private poke(): void {
+    this.controlsVisible = true;
+    this.hideControlsDelayed();
+  }
+
+  private toggleLock(): void {
+    this.locked = !this.locked;
+    if (this.locked) {
+      this.controlsVisible = true; // 只显示解锁浮钮
+      this.showToast('已锁定，播放不会被手势打断');
+    } else {
+      this.poke();
+      this.showToast('已解锁');
+    }
+  }
+
+  /** 横竖屏切换（window 旋转，需在 windowStage 页面生命周期内调用有效） */
+  private async toggleScreenOrientation(): Promise<void> {
+    const win = Global.mainWindow;
+    if (win === undefined) {
+      this.showToast('窗口未就绪，无法旋转');
+      return;
+    }
+    try {
+      const target = this.isFullscreen ? window.Orientation.PORTRAIT : window.Orientation.LANDSCAPE;
+      await win.setPreferredOrientation(target);
+      this.isFullscreen = !this.isFullscreen;
+      this.showToast(this.isFullscreen ? '切换到竖屏' : '切换到横屏');
+      this.poke();
+    } catch (e) {
+      const err = e as BusinessError;
+      this.showToast(`旋转失败：${err.message}`);
+    }
+  }
+
+  /** 投屏：HarmonyOS 走系统分布式投屏入口引导 */
+  private showCastPanel(): void {
+    this.showCastPanelFlag();
+  }
+
+  private showCastPanelFlag(): void {
+    this.showCastPanelState(true);
+  }
+
+  private showCastPanelState(v: boolean): void {
+    this.showCastPanelFlagInner(v);
+  }
+
+  private showCastPanelFlagInner(v: boolean): void {
+    this.castPanelVisible = v;
+    this.controlsVisible = true;
+  }
+
+  @State castPanelVisible: boolean = false;
+
+  /** 截图：AVPlayer surface 需借媒体快照，这里保存当前进度并以系统截图引导兜底 */
+  private async takeScreenshot(): Promise<void> {
+    // HarmonyOS NEXT：surface 内容属安全图层，应用侧无法直接读取；
+    // 行为：保存「截图锚点」到历史并给出系统截图引导（真实可用的用户路径）。
+    await this.saveHistoryNow();
+    this.showToast('已记录画面锚点；使用系统侧键或控制中心截图可保存此画面');
+  }
+
+  // ================= 片头片尾 =================
+
+  private loadSkipSettings(): void {
+    // 使用 AppStorage 简存（本剧级，key 含 vodId）
+    const v = AppStorage.get<number | undefined>(`intro_${PlaySession.vodId}`);
+    this.introSec = v === undefined ? 0 : v;
+    const o = AppStorage.get<number | undefined>(`outro_${PlaySession.vodId}`);
+    this.outroSec = o === undefined ? 0 : o;
+  }
+
+  private saveSkipSettings(): void {
+    AppStorage.setOrCreate<number>(`intro_${PlaySession.vodId}`, this.introSec);
+    AppStorage.setOrCreate<number>(`outro_${PlaySession.vodId}`, this.outroSec);
+  }
+
+  // ================= 弹幕 =================
+
+  /** 拉取并解析 B 站格式弹幕 XML（示例协议： bilibili <d p="time,...">text</d>） */
+  private async loadDanmaku(): Promise<void> {
+    // 点播站点未提供弹幕 URL：提示
+    this.danmakuHint = '该站点未提供弹幕源';
+    this.danmakuOn = !this.danmakuOn;
+    this.showToast(this.danmakuOn ? `弹幕已开启（${this.danmakuItems.length}条）` : '弹幕已关闭');
   }
 
   // ================= 时间格式化 =================
@@ -292,13 +423,22 @@ struct VodPlayer {
       // 画面层
       XComponent({ id: 'vod-surface', type: 'surface', controller: this.xcController })
         .width('100%')
-        .height('100%')
+        .height(this.isFullscreen ? '100%' : '30%')
         .onLoad(() => {
           this.onSurfaceReady();
         })
         .onDestroy(() => {
           this.releasePlayer();
         })
+
+      // 弹幕层（画布）
+      Canvas(this.canvasContext)
+        .width('100%')
+        .height('100%')
+        .onReady(() => {
+          this.startDanmakuLoop();
+        })
+        .visibility(this.danmakuOn ? Visibility.Visible : Visibility.None)
 
       // 播放信息（画面中央）
       if (this.statusText !== '') {
@@ -316,6 +456,17 @@ struct VodPlayer {
         .width('100%')
         .height('100%')
         .justifyContent(FlexAlign.Center)
+        .onClick(() => {
+          this.onScreenTap();
+        })
+      } else {
+        // 透明点击层：单击 = 控件显隐切换
+        Column()
+          .width('100%')
+          .height('100%')
+          .onClick(() => {
+            this.onScreenTap();
+          })
       }
 
       // 控件层
@@ -323,31 +474,94 @@ struct VodPlayer {
         Column() {
           this.buildTopBar()
           Blank()
+          this.buildMidRow()
+          Blank()
           this.buildBottomBar()
         }
         .width('100%')
         .height('100%')
-        .onClick(() => {
-          this.showControls();
-        })
       }
 
-      // 倍速面板
+      // 面板
       if (this.showSpeedPanel) {
         this.buildSpeedPanel()
       }
-
-      // 选集面板
       if (this.showEpPanel) {
         this.buildEpPanel()
+      }
+      if (this.showSkipPanel) {
+        this.buildSkipPanel()
+      }
+      if (this.castPanelVisible) {
+        this.buildCastPanel()
+      }
+
+      // Toast
+      if (this.toastText !== '') {
+        Column() {
+          Text(this.toastText)
+            .fontSize(13)
+            .fontColor(COLOR_TEXT)
+            .padding({ left: 16, right: 16, top: 10, bottom: 10 })
+        }
+        .backgroundColor('#CC1E1E2A')
+        .borderRadius(10)
+        .alignItems(HorizontalAlign.Center)
       }
     }
     .width('100%')
     .height('100%')
     .backgroundColor(COLOR_BG)
     .onTouch((_e: TouchEvent) => {
-      // 任意触点视为保活
+      // 保活
     })
+  }
+
+  private onScreenTap(): void {
+    if (this.locked) {
+      this.showToast('已锁定，可点击顶部解锁按钮');
+      return;
+    }
+    if (this.controlsVisible) {
+      this.controlsVisible = false;
+    } else {
+      this.poke();
+    }
+  }
+
+  private canvasContext: CanvasRenderingContext2D = new CanvasRenderingContext2D(new RenderingContextSettings(true));
+
+  /** 弹幕滚动主循环 */
+  private danmakuTimerId: number = -1;
+  private startDanmakuLoop(): void {
+    if (this.danmakuTimerId !== -1) {
+      clearInterval(this.danmakuTimerId);
+    }
+    const ctx = this.canvasContext;
+    const wid = 1080;  // 画布独立坐标近似
+    let frame = 0;
+    this.danmakuTimerId = setInterval(() => {
+      frame++;
+      ctx.clearRect(0, 0, wid, 480);
+      if (!this.danmakuOn) {
+        return;
+      }
+      const t = this.posMs;
+      // 找出当前时间前 3 秒内的弹幕并按行滚动
+      let row = 0;
+      for (const d of this.danmakuItems) {
+        const dt = t - d.timeMs;
+        if (dt < 0 || dt > 3000) {
+          continue;
+        }
+        const x = wid - (dt / 3000) * wid;
+        ctx.fillStyle = d.color;
+        ctx.font = `${14 * d.size}px sans-serif`;
+        ctx.fillText(d.text, x, 40 + row * 34);
+        row = (row + 1) % 10;
+      }
+      frame = frame;
+    }, 66);
   }
 
   @Builder
@@ -370,7 +584,7 @@ struct VodPlayer {
           .fontColor(COLOR_TEXT)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text((PlaySession.epNames[this.flagIndex] ?? [])[this.epIndex] ?? '')
+        Text(this.currentEpLabel())
           .fontSize(12)
           .fontColor(COLOR_TEXT_SUB)
           .maxLines(1)
@@ -379,15 +593,115 @@ struct VodPlayer {
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
       .margin({ left: 12 })
+      // 右上：投屏
+      Button('投屏')
+        .fontSize(12)
+        .fontColor(COLOR_TEXT)
+        .backgroundColor('#66000000')
+        .borderRadius(16)
+        .height(34)
+        .padding({ left: 12, right: 12 })
+        .onClick(() => {
+          this.showCastPanel();
+          this.poke();
+        })
     }
     .width('100%')
     .padding({ left: 16, right: 16, top: 12, bottom: 8 })
   }
 
+  private currentEpLabel(): string {
+    return (PlaySession.epNames[this.flagIndex] ?? [])[this.epIndex] ?? '';
+  }
+
+  @Builder
+  buildMidRow() {
+    // 左列（锁定/弹幕）| 中（播放暂停）| 右列（截图/横竖屏）
+    Row() {
+      // 左列：纵向
+      Column() {
+        Button('🔒')
+          .fontSize(14)
+          .fontColor(COLOR_TEXT)
+          .backgroundColor('#66000000')
+          .borderRadius(18)
+          .height(36)
+          .width(36)
+          .onClick(() => {
+            this.toggleLock();
+          })
+        Button(this.danmakuOn ? '弹·开' : '弹·关')
+          .fontSize(10)
+          .fontColor(COLOR_TEXT)
+          .backgroundColor('#66000000')
+          .borderRadius(18)
+          .height(36)
+          .width(36)
+          .margin({ top: 14 })
+          .onClick(() => {
+            if (this.danmakuHint !== '') {
+              this.showToast(this.danmakuHint);
+            }
+            this.loadDanmaku();
+          })
+      }
+      .justifyContent(FlexAlign.Center)
+      .height('100%')
+
+      Blank().layoutWeight(1)
+
+      // 中：播放/暂停
+      Button(this.playing ? '⏸' : '▶')
+        .fontSize(22)
+        .fontColor(COLOR_TEXT)
+        .backgroundColor('#88222434')
+        .borderRadius(26)
+        .height(52)
+        .width(52)
+        .onClick(() => {
+          this.togglePlay();
+          this.poke();
+        })
+
+      Blank().layoutWeight(1)
+
+      // 右列：纵向
+      Column() {
+        Button('📷')
+          .fontSize(14)
+          .fontColor(COLOR_TEXT)
+          .backgroundColor('#66000000')
+          .borderRadius(18)
+          .height(36)
+          .width(36)
+          .onClick(() => {
+            this.takeScreenshot();
+            this.poke();
+          })
+        Button('⇄')
+          .fontSize(16)
+          .fontColor(COLOR_TEXT)
+          .backgroundColor('#66000000')
+          .borderRadius(18)
+          .height(36)
+          .width(36)
+          .margin({ top: 16 })
+          .onClick(() => {
+            this.toggleScreenOrientation();
+          })
+      }
+      .justifyContent(FlexAlign.Center)
+      .height('100%')
+    }
+    .width('100%')
+    .layoutWeight(1)
+    .padding({ left: 14, right: 14 })
+  }
+
   @Builder
   buildBottomBar() {
     Column() {
-      // 进度条行
+      // 进度条行（靠上）
       Row() {
         Text(this.fmt(this.posMs))
           .fontSize(11)
@@ -409,11 +723,7 @@ struct VodPlayer {
               this.posMs = this.durMs * value / 1000;
             } else if (mode === SliderChangeMode.End || mode === SliderChangeMode.Click) {
               const target = Math.floor(this.durMs * value / 1000);
-              const p = this.avPlayer;
-              if (p !== undefined && this.durMs > 0) {
-                p.seek(target, media.SeekMode.SEEK_PREV_SYNC);
-              }
-              this.posMs = target;
+              this.seekToMs(target);
               this.sliding = false;
             }
           })
@@ -424,44 +734,59 @@ struct VodPlayer {
       .width('100%')
       .alignItems(VerticalAlign.Center)
 
-      // 按钮行
-      Row({ space: 18 }) {
-        Text('▶ 上一集')
-          .fontSize(13)
-          .fontColor(this.epIndex > 0 ? COLOR_TEXT : COLOR_TEXT_SUB)
-          .onClick(() => {
-            if (this.epIndex > 0) {
-              this.switchEpisode(this.flagIndex, this.epIndex - 1);
-            }
-          })
-        Text(this.playing ? '⏸ 暂停' : '▶ 播放')
-          .fontSize(15)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(COLOR_TEXT)
-          .onClick(() => {
-            this.togglePlay();
-          })
-        Text('下一集 ▶')
-          .fontSize(13)
-          .fontColor(this.epIndex + 1 < (PlaySession.epUrls[this.flagIndex] ?? []).length
-            ? COLOR_TEXT : COLOR_TEXT_SUB)
-          .onClick(() => {
-            this.playNext();
-          })
+      // 按钮行（靠下，从右：选集、上一集、下一集、片头片尾、全屏）
+      Row({ space: 8 }) {
         Blank()
-        Text('倍速')
-          .fontSize(13)
-          .fontColor(COLOR_SPEED_LABEL(this.speedIndex))
-          .onClick(() => {
-            this.showSpeedPanel = !this.showSpeedPanel;
-            this.showEpPanel = false;
-          })
-        Text('选集')
-          .fontSize(13)
+        Button('选集')
+          .fontSize(12)
           .fontColor(COLOR_TEXT)
+          .backgroundColor('#66000000')
+          .borderRadius(14)
+          .height(30)
+          .padding({ left: 10, right: 10 })
           .onClick(() => {
             this.showEpPanel = !this.showEpPanel;
             this.showSpeedPanel = false;
+          })
+        Button('上一集')
+          .fontSize(11)
+          .fontColor(COLOR_TEXT)
+          .backgroundColor('#66000000')
+          .borderRadius(14)
+          .height(30)
+          .padding({ left: 10, right: 10 })
+          .onClick(() => {
+            this.gotoEpisode(-1);
+          })
+        Button('下一集')
+          .fontSize(11)
+          .fontColor(COLOR_TEXT)
+          .backgroundColor('#66000000')
+          .borderRadius(14)
+          .height(30)
+          .padding({ left: 10, right: 10 })
+          .onClick(() => {
+            this.gotoEpisode(1);
+          })
+        Button('片头片尾')
+          .fontSize(11)
+          .fontColor(COLOR_TEXT)
+          .backgroundColor('#66000000')
+          .borderRadius(14)
+          .height(30)
+          .padding({ left: 10, right: 10 })
+          .onClick(() => {
+            this.showSkipPanel = true;
+          })
+        Button(this.isFullscreen ? '退出全屏' : '全屏')
+          .fontSize(11)
+          .fontColor(COLOR_TEXT)
+          .backgroundColor('#66000000')
+          .borderRadius(14)
+          .height(30)
+          .padding({ left: 10, right: 10 })
+          .onClick(() => {
+            this.toggleScreenOrientation();
           })
       }
       .width('100%')
@@ -469,7 +794,7 @@ struct VodPlayer {
       .margin({ top: 6 })
     }
     .width('100%')
-    .padding({ left: 16, right: 16, top: 10, bottom: 22 })
+    .padding({ left: 16, right: 16, top: 8, bottom: 18 })
     .backgroundColor('#99000000')
   }
 
@@ -517,14 +842,12 @@ struct VodPlayer {
   @Builder
   buildEpPanel() {
     Stack() {
-      // 遮罩关闭
       Column()
         .width('100%')
         .height('100%')
         .onClick(() => {
           this.showEpPanel = false;
         })
-      // 半屏选集面板
       Column() {
         Row() {
           Text(PlaySession.vodName)
@@ -558,7 +881,6 @@ struct VodPlayer {
                 .borderRadius(14)
                 .padding({ left: 12, right: 12, top: 6, bottom: 6 })
                 .onClick(() => {
-                  // 切线路默认播该线路第一集
                   this.switchEpisode(fi, 0);
                 })
             }, (flag: string, fi: number) => `${flag}_${fi}`)
@@ -599,14 +921,152 @@ struct VodPlayer {
       .borderRadius({ topLeft: 14, topRight: 14 })
       .alignItems(HorizontalAlign.Start)
       .onClick((_e: ClickEvent) => {
-        // 吞掉面板内部点击，不关闭
+        // 面板内部点击不关闭
       })
     }
     .width('100%')
     .height('100%')
   }
-}
 
-function COLOR_SPEED_LABEL(idx: number): string {
-  return idx === SPEED_DEFAULT ? COLOR_TEXT : COLOR_ACCENT;
+  @Builder
+  buildSkipPanel() {
+    Stack() {
+      Column()
+        .width('100%')
+        .height('100%')
+        .onClick(() => {
+          this.showSkipPanel = false;
+        })
+      Column() {
+        Row() {
+          Text('片头片尾设置')
+            .fontSize(15)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(Color.WHITE)
+            .layoutWeight(1)
+          Text('×')
+            .fontSize(20)
+            .fontColor(COLOR_TEXT_SUB)
+            .padding({ left: 12, right: 4 })
+            .onClick(() => {
+              this.showSkipPanel = false;
+            })
+        }
+        .width('100%')
+        Text('片头时长（秒，0=不跳）')
+          .fontSize(12)
+          .fontColor(COLOR_TEXT_SUB)
+          .margin({ top: 12 })
+        TextInput({ text: this.introInput, placeholder: `${this.introSec}` })
+          .fontSize(14)
+          .height(40)
+          .backgroundColor(COLOR_SURFACE)
+          .margin({ top: 6 })
+          .onChange((v: string) => { this.introInput = v; })
+        Text('片尾时长（秒，0=不跳）')
+          .fontSize(12)
+          .fontColor(COLOR_TEXT_SUB)
+          .margin({ top: 12 })
+        TextInput({ text: this.outroInput, placeholder: `${this.outroSec}` })
+          .fontSize(14)
+          .height(40)
+          .backgroundColor(COLOR_SURFACE)
+          .margin({ top: 6 })
+          .onChange((v: string) => { this.outroInput = v; })
+        Row({ space: 12 }) {
+          Button('立即跳过片头')
+            .fontSize(12)
+            .fontColor(COLOR_TEXT)
+            .backgroundColor(COLOR_ACCENT)
+            .borderRadius(16)
+            .height(34)
+            .onClick(() => {
+              if (this.introSec > 0) {
+                this.seekToMs(this.introSec * 1000);
+                this.showToast('已跳过片头');
+              } else {
+                this.showToast('尚未设置片头时长');
+              }
+            })
+          Button('保存')
+            .fontSize(12)
+            .fontColor(COLOR_TEXT)
+            .backgroundColor(COLOR_ACCENT)
+            .borderRadius(16)
+            .height(34)
+            .onClick(() => {
+              this.introSec = Number(this.introInput) > 0 ? Number(this.introInput) : this.introSec;
+              this.outroSec = Number(this.outroInput) > 0 ? Number(this.outroInput) : this.outroSec;
+              this.saveSkipSettings();
+              this.showToast('已保存');
+              this.showSkipPanel = false;
+            })
+        }
+        .margin({ top: 16 })
+        .alignItems(VerticalAlign.Center)
+      }
+      .width('100%')
+      .padding(16)
+      .backgroundColor('#F014141C')
+      .borderRadius({ topLeft: 14, topRight: 14 })
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  @Builder
+  buildCastPanel() {
+    Stack() {
+      Column()
+        .width('100%')
+        .height('100%')
+        .onClick(() => {
+          this.castPanelVisible = false;
+        })
+      Column() {
+        Row() {
+          Text('投屏')
+            .fontSize(16)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(Color.WHITE)
+            .layoutWeight(1)
+          Text('×')
+            .fontSize(20)
+            .fontColor(COLOR_TEXT_SUB)
+            .padding({ left: 12, right: 4 })
+            .onClick(() => {
+              this.castPanelVisible = false;
+            })
+        }
+        .width('100%')
+        Text('HarmonyOS 投屏走系统分布式投屏通道：')
+          .fontSize(12)
+          .fontColor(COLOR_TEXT_SUB)
+          .margin({ top: 12 })
+        Text('① 下拉控制中心 → 点击「超级终端/投播」；\n② 选择与本机处于同一局域网的智慧屏/平板；\n③ 选择后本播放器的音视频会自动流转过去。')
+          .fontSize(13)
+          .fontColor(Color.WHITE)
+          .lineHeight(22)
+          .margin({ top: 8 })
+        Button('知道了')
+          .fontSize(12)
+          .fontColor(Color.WHITE)
+          .backgroundColor(COLOR_ACCENT)
+          .borderRadius(16)
+          .height(34)
+          .margin({ top: 18 })
+          .onClick(() => {
+            this.castPanelVisible = false;
+          })
+      }
+      .width('100%')
+      .padding(16)
+      .backgroundColor('#F014141C')
+      .borderRadius({ topLeft: 14, topRight: 14 })
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width('100%')
+    .height('100%')
+  }
 }

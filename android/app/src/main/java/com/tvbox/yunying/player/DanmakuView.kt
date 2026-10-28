@@ -116,7 +116,7 @@ class DanmakuView(context: Context) : View(context) {
             val x = s.x - speed * 1f
             s.x = x
             val y = s.y.toFloat()
-            strokePaint.drawText(s.text, x, y, strokePaint)
+            canvas.drawText(s.text, x, y, strokePaint)
             canvas.drawText(s.text, x, y, paint)
         }
         if (onScreen.isNotEmpty()) scheduleFrame()

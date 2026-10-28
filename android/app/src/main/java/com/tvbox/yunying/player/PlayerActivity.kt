@@ -10,7 +10,6 @@ import android.graphics.Color
 import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
 import android.media.AudioManager
-import android.media.MediaRouter
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -20,6 +19,7 @@ import android.util.Log
 import android.view.*
 import android.widget.FrameLayout
 import android.widget.GridLayout
+import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.SeekBar
 import android.widget.LinearLayout
@@ -439,12 +439,15 @@ class PlayerActivity : AppCompatActivity(), PlayerEngine.PlayerListener {
                 gravity = Gravity.END or Gravity.CENTER_VERTICAL
             }.also { row ->
                 fun act(label: String, idTag: String, onClick: () -> Unit) {
+                    val lp = LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                    )
+                    lp.marginEnd = dp(10)
                     row.addView(textBtn(label, 13f).apply {
                         tag = idTag
-                        marginEnd = dp(10)
-                        layoutParams = (layoutParams as LinearLayout.LayoutParams).apply { marginEnd = dp(10) }
                         setOnClickListener { onClick(); poke() }
-                    })
+                    }, lp)
                 }
                 act("选集", "episodes") { showEpisodeDialog() }
                 act("上一集", "prev") { gotoEpisode(-1) }
@@ -661,33 +664,51 @@ class PlayerActivity : AppCompatActivity(), PlayerEngine.PlayerListener {
         playEpisodeDirect(target)
     }
 
-    /** 投屏：系统 MediaRouter 路由探测 + 路由选择；无可用路由时引导到系统投屏设置 */
+    /** 投屏：系统 MediaRouter2 路由探测 + 路由选择；无可用路由时打开系统投屏设置 */
     private fun showCastDialog(anchor: View) {
-        val router = getSystemService(Context.MEDIA_ROUTER_SERVICE) as MediaRouter
-        val routes = router.routes.toList()
-        if (routes.isEmpty()) {
-            AlertDialog.Builder(this)
-                .setTitle("投屏")
-                .setMessage("当前未发现可投屏的设备。\n\n请确认手机与目标设备在同一 Wi-Fi，或使用系统投屏（设置 → 连接与共享 → 投屏）后重试。")
-                .setPositiveButton("打开系统投屏") { _, _ ->
-                    runCatching {
-                        startActivity(Intent("android.settings.CAST_SETTINGS")
-                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                    }
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            try {
+                val router = android.media.MediaRouter2.getInstance(this)
+                val routes = router.routes
+                if (routes.isEmpty()) {
+                    openSystemCastSettings()
+                    return
                 }
-                .setNegativeButton("关闭", null)
-                .show()
-            return
-        }
-        val items = routes.map { r -> "📺 ${r.name}" }
-        AlertDialog.Builder(this)
-            .setTitle("投屏到…")
-            .setItems(items.toTypedArray()) { _, which ->
-                val route = routes[which]
-                route.select()
-                Toast.makeText(this, "已切换输出：${route.name}", Toast.LENGTH_SHORT).show()
+                val items = routes.map { r -> "📺 ${r.name}" }
+                AlertDialog.Builder(this)
+                    .setTitle("投屏到…")
+                    .setItems(items.toTypedArray()) { d, which ->
+                        val route = routes[which]
+                        try {
+                            router.selectRoute(route)
+                            Toast.makeText(this, "已切换输出：${route.name}", Toast.LENGTH_SHORT).show()
+                        } catch (t: Throwable) {
+                            Toast.makeText(this, "切换输出失败：${t.message}", Toast.LENGTH_SHORT).show()
+                        }
+                        d.dismiss()
+                    }
+                    .setNegativeButton("取消", null)
+                    .show()
+            } catch (t: Throwable) {
+                openSystemCastSettings()
             }
-            .setNegativeButton("取消", null)
+        } else {
+            openSystemCastSettings()
+        }
+    }
+
+    private fun openSystemCastSettings() {
+        AlertDialog.Builder(this)
+            .setTitle("投屏")
+            .setMessage("当前未发现可投屏的设备。\n\n请确认手机与目标设备在同一 Wi-Fi，或在系统设置中打开投屏后重试。")
+            .setPositiveButton("打开系统投屏") { d, _ ->
+                runCatching {
+                    startActivity(Intent("android.settings.CAST_SETTINGS")
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                }
+                d.dismiss()
+            }
+            .setNegativeButton("关闭", null)
             .show()
     }
 
@@ -1182,6 +1203,7 @@ class GestureLayout(context: Context) : FrameLayout(context) {
     companion object {
         const val MODE_VERTICAL = 1
         const val MODE_HORIZONTAL = 2
+        const val LONG_PRESS_MS = 600L
     }
 
     var onGestureStart: ((mode: Int) -> Unit)? = null

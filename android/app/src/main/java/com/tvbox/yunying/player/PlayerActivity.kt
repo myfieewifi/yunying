@@ -27,6 +27,7 @@ import com.tvbox.yunying.HistoryItem
 import com.tvbox.yunying.HistoryStore
 import com.tvbox.yunying.player.mpv.ExoPlayerEngine
 import com.tvbox.yunying.player.mpv.MpvPlayerEngine
+import com.tvbox.yunying.spider.SpiderManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -326,10 +327,11 @@ class PlayerActivity : AppCompatActivity(), PlayerEngine.PlayerListener {
             hideOverlayDelayed()
         }
         playerContainer.onLongPressStart = {
-            if (currentEngine is ExoPlayerEngine) {
+            val eng = currentEngine
+            if (eng is ExoPlayerEngine) {
                 boosting = true
                 savedSpeed = currentSpeed
-                currentEngine.setSpeed(BOOST_SPEED)
+                eng.setSpeed(BOOST_SPEED)
                 showOverlay("⚡ ${BOOST_SPEED}倍速快进中", null)
             } else {
                 boosting = false

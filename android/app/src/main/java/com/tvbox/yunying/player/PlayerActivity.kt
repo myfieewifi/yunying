@@ -492,7 +492,7 @@ class PlayerActivity : AppCompatActivity(), PlayerEngine.PlayerListener {
                 playerContainer.locked = false
                 visibility = View.GONE
                 setControlsVisible(true); poke()
-                Toast.makeText(this, "已解锁操作", Toast.LENGTH_SHORT).show()
+                Toast.makeText(applicationContext, "已解锁操作", Toast.LENGTH_SHORT).show()
             }
         }
         playerContainer.addView(unlockChip)
@@ -593,11 +593,14 @@ class PlayerActivity : AppCompatActivity(), PlayerEngine.PlayerListener {
         }
 
         if (eng is ExoPlayerEngine) {
-            val sv = playerView.videoSurfaceView ?: run { Toast.makeText(this, "暂无画面可截取", Toast.LENGTH_SHORT).show(); return }
+            val sv = playerView.videoSurfaceView
+            if (sv == null) {
+                Toast.makeText(this, "未找到画面可截取", Toast.LENGTH_SHORT).show()
+                return
+            }
             val bmp = Bitmap.createBitmap(sv.width.coerceAtLeast(1), sv.height.coerceAtLeast(1), Bitmap.Config.ARGB_8888)
-            val loc = IntArray(2); sv.getLocationInWindow(loc)
             try {
-                PixelCopy.request(sv.window, Rect(loc[0], loc[1], loc[0] + sv.width, loc[1] + sv.height), bmp, { r -> if (r == PixelCopy.SUCCESS) storeBitmap(bmp) }, Handler(Looper.getMainLooper()))
+                PixelCopy.request(sv, bmp, { r -> if (r == PixelCopy.SUCCESS) storeBitmap(bmp) }, Handler(Looper.getMainLooper()))
             } catch (t: Throwable) {
                 Log.e("PlayerActivity", "PixelCopy 失败", t)
             }

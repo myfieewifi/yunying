@@ -14,11 +14,11 @@ const COLOR_SURFACE = '#1E1E2A';
 
 /** 倍速档位（AVPlayer 支持的固定档） */
 const SPEEDS: media.PlaybackSpeed[] = [
-  media.PlaybackSpeed.SPEED_FORWARD_0_75,
-  media.PlaybackSpeed.SPEED_FORWARD_1_00,
-  media.PlaybackSpeed.SPEED_FORWARD_1_25,
-  media.PlaybackSpeed.SPEED_FORWARD_1_75,
-  media.PlaybackSpeed.SPEED_FORWARD_2_00
+  media.PlaybackSpeed.SPEED_FORWARD_0_75_X,
+  media.PlaybackSpeed.SPEED_FORWARD_1_00_X,
+  media.PlaybackSpeed.SPEED_FORWARD_1_25_X,
+  media.PlaybackSpeed.SPEED_FORWARD_1_75_X,
+  media.PlaybackSpeed.SPEED_FORWARD_2_00_X
 ];
 const SPEED_LABELS: string[] = ['0.75x', '1x', '1.25x', '1.75x', '2x'];
 const SPEED_DEFAULT = 1;
@@ -109,9 +109,6 @@ struct VodPlayer {
         this.buffering = false;
         this.statusText = `播放失败：${err.message}`;
       });
-      player.on('durationChange', (duration: number) => {
-        this.durMs = duration <= 0 ? 0 : duration;
-      });
       player.on('timeUpdate', (time: number) => {
         if (!this.sliding) {
           this.posMs = time;
@@ -124,6 +121,8 @@ struct VodPlayer {
         if (state === 'prepared') {
           this.buffering = false;
           this.statusText = '缓冲中…';
+          const d = player.duration;
+          this.durMs = d <= 0 ? 0 : d;
           player.play().catch(() => {});
         } else if (state === 'playing') {
           this.buffering = false;
@@ -397,7 +396,7 @@ struct VodPlayer {
           value: this.durMs > 0 ? this.posMs / this.durMs * 1000 : 0,
           min: 0,
           max: 1000,
-          style: SliderStyle.Outset
+          style: SliderStyle.OutSet
         })
           .selectedColor(COLOR_ACCENT)
           .trackColor('#33FFFFFF')
@@ -412,7 +411,7 @@ struct VodPlayer {
               const target = Math.floor(this.durMs * value / 1000);
               const p = this.avPlayer;
               if (p !== undefined && this.durMs > 0) {
-                p.seek(target, media.SeekMode.SEEK_PREV_SYNC).catch(() => {});
+                p.seek(target, media.SeekMode.SEEK_PREV_SYNC);
               }
               this.posMs = target;
               this.sliding = false;
@@ -495,7 +494,7 @@ struct VodPlayer {
               .onClick(() => {
                 const p = this.avPlayer;
                 if (p !== undefined) {
-                  p.setSpeed(SPEEDS[idx]).catch(() => {});
+                  p.setSpeed(SPEEDS[idx]);
                 }
                 this.speedIndex = idx;
                 this.showSpeedPanel = false;

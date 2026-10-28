@@ -404,7 +404,7 @@ struct Index {
       }
     }
     this.showDetail = false;
-    router.pushUrl('pages/VodPlayer').catch(() => {});
+    router.pushUrl({ url: 'pages/VodPlayer' }).catch(() => {});
   }
 
   /** 直接从历史继续播放（先拉详情拿线路再续播） */
@@ -447,7 +447,7 @@ struct Index {
       PlaySession.epIndex = ei;
       PlaySession.resumePosition = h.position;
       this.detailLoading = false;
-      router.pushUrl('pages/VodPlayer').catch(() => {});
+      router.pushUrl({ url: 'pages/VodPlayer' }).catch(() => {});
     } catch (e) {
       const err = e as BusinessError;
       this.detailLoading = false;

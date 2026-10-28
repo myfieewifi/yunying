@@ -27,6 +27,17 @@ class MpvPlayerEngine(private val context: Context) : PlayerEngine {
         private const val TAG = "MpvPlayerEngine"
         private const val MPV_CLASS = "is.xyz.mpv.MPVLib"
         private const val OBSERVER_CLASS = "is.xyz.mpv.MPVLib\$EventObserver"
+
+        /**
+         * 运行时检测 libmpv 是否可用（APK 内置了 MPVLib 类才算可用）。
+         * 切换内核前先检查，避免 init/play 抛异常导致闪退。
+         */
+        fun isAvailable(): Boolean = try {
+            Class.forName(MPV_CLASS)
+            true
+        } catch (_: Throwable) {
+            false
+        }
     }
 
     private val handler = Handler(Looper.getMainLooper())

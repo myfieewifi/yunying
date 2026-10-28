@@ -50,6 +50,8 @@ data class HomeUiState(
     val searchResults: List<Vod> = emptyList(),
     val searching: Boolean = false,
     val searched: Boolean = false,
+    // 播放历史（继续观看）
+    val history: List<HistoryItem> = emptyList(),
 )
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
@@ -62,6 +64,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         SpiderManager.init(app)
+        refreshHistory()
         viewModelScope.launch {
             val last = ConfigLoader.last(app)
             if (last != null) {
@@ -77,6 +80,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun navigate(screen: Screen) {
         if (screen is Screen.Detail) returnScreen = _ui.value.screen
         _ui.value = _ui.value.copy(screen = screen)
+        if (screen == Screen.Home) refreshHistory()
         when (screen) {
             is Screen.Detail -> openDetail(screen.vod)
             is Screen.Channel -> if (_ui.value.currentCategoryTid == null) selectCategory(_ui.value.categories.firstOrNull()?.type_id)
@@ -89,8 +93,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val s = _ui.value.screen
         when (s) {
             is Screen.Detail -> _ui.value = _ui.value.copy(screen = returnScreen, detail = null, episodes = emptyList())
-            is Screen.Channel -> _ui.value = _ui.value.copy(screen = Screen.Home)
-            is Screen.Search -> _ui.value = _ui.value.copy(screen = Screen.Home, searchResults = emptyList(), searched = false, searchQuery = "")
+            is Screen.Channel -> {
+                _ui.value = _ui.value.copy(screen = Screen.Home)
+                refreshHistory()
+            }
+            is Screen.Search -> {
+                _ui.value = _ui.value.copy(screen = Screen.Home, searchResults = emptyList(), searched = false, searchQuery = "")
+                refreshHistory()
+            }
             else -> return false
         }
         return true
@@ -244,9 +254,84 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun playEpisode(flag: String, episode: Episode) {
         val cfg = _ui.value.config ?: return
         val detail = _ui.value.detail ?: return
+        val group = _ui.value.episodes.firstOrNull { it.flag == flag }
+        startPlayer(
+            site = cfg.sites[_ui.value.currentSiteIndex],
+            siteIndex = _ui.value.currentSiteIndex,
+            vodId = detail.vod_id,
+            vodName = detail.vod_name,
+            vodPic = detail.vod_pic,
+            flag = flag,
+            episode = episode,
+            episodes = group?.episodes ?: listOf(episode),
+            position = 0L,
+        )
+    }
+
+    /** 从播放历史直接续播（重新拉详情定位集数，再取播放地址） */
+    fun resumeFromHistory(h: HistoryItem) {
+        val cfg = _ui.value.config ?: return
+        if (h.siteIndex !in cfg.sites.indices) {
+            _ui.value = _ui.value.copy(error = "该历史对应的站点已不在当前订阅中")
+            return
+        }
         viewModelScope.launch {
             runCatching {
-                val site = cfg.sites[_ui.value.currentSiteIndex]
+                val site = cfg.sites[h.siteIndex]
+                val spider = withContext(Dispatchers.IO) { SpiderManager.get(site) }
+                val map = withContext(Dispatchers.IO) { spider.detailContent(listOf(h.vodId)) }
+                val list = (map["list"] as? List<*>) ?: emptyList<Any>()
+                val m = list.firstOrNull() as? Map<*, *> ?: map
+                fun str(k: String): String? = (m[k] as? String)?.takeIf { it.isNotBlank() }
+                val detail = VodDetail(
+                    vod_id = str("vod_id") ?: h.vodId,
+                    vod_name = str("vod_name") ?: h.vodName,
+                    vod_pic = str("vod_pic") ?: h.vodPic,
+                    vod_remarks = str("vod_remarks"),
+                    vod_year = str("vod_year"),
+                    vod_area = str("vod_area"),
+                    vod_director = str("vod_director"),
+                    vod_actor = str("vod_actor"),
+                    vod_content = str("vod_content"),
+                    vod_play_from = str("vod_play_from"),
+                    vod_play_url = str("vod_play_url"),
+                )
+                val groups = parseEpisodes(detail)
+                val group = groups.firstOrNull { it.flag == h.flag } ?: groups.firstOrNull()
+                    ?: throw IllegalStateException("未找到可播放的集数")
+                val ep = group.episodes.firstOrNull { it.id == h.episodeId } ?: group.episodes.firstOrNull()
+                    ?: throw IllegalStateException("未找到可播放的集数")
+                startPlayer(
+                    site = site,
+                    siteIndex = h.siteIndex,
+                    vodId = h.vodId,
+                    vodName = detail.vod_name,
+                    vodPic = detail.vod_pic,
+                    flag = group.flag,
+                    episode = ep,
+                    episodes = group.episodes,
+                    position = h.position,
+                )
+            }.onFailure {
+                _ui.value = _ui.value.copy(error = it.message ?: "续播失败")
+            }
+        }
+    }
+
+    /** 解析播放地址并启动播放器（携带选集列表与续播位置） */
+    private fun startPlayer(
+        site: Site,
+        siteIndex: Int,
+        vodId: String,
+        vodName: String,
+        vodPic: String,
+        flag: String,
+        episode: Episode,
+        episodes: List<Episode>,
+        position: Long,
+    ) {
+        viewModelScope.launch {
+            runCatching {
                 val spider = withContext(Dispatchers.IO) { SpiderManager.get(site) }
                 val map = withContext(Dispatchers.IO) { spider.playerContent(flag, episode.id, listOf(flag)) }
                 @Suppress("UNCHECKED_CAST")
@@ -264,8 +349,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 val intent = Intent(getApplication(), PlayerActivity::class.java).apply {
                     putExtra(PlayerActivity.EXTRA_URL, target)
-                    putExtra(PlayerActivity.EXTRA_TITLE, "${detail.vod_name}·${episode.name}")
+                    putExtra(PlayerActivity.EXTRA_TITLE, "${vodName}·${episode.name}")
                     putExtra(PlayerActivity.EXTRA_HEADERS, java.util.HashMap(headers))
+                    putExtra(PlayerActivity.EXTRA_SITE_INDEX, siteIndex)
+                    putExtra(PlayerActivity.EXTRA_VOD_ID, vodId)
+                    putExtra(PlayerActivity.EXTRA_VOD_NAME, vodName)
+                    putExtra(PlayerActivity.EXTRA_VOD_PIC, vodPic)
+                    putExtra(PlayerActivity.EXTRA_FLAG, flag)
+                    putExtra(PlayerActivity.EXTRA_EPISODE_ID, episode.id)
+                    putExtra(PlayerActivity.EXTRA_EPISODES, com.google.gson.Gson().toJson(episodes))
+                    putExtra(PlayerActivity.EXTRA_POSITION, position)
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
                 getApplication<Application>().startActivity(intent)
@@ -273,6 +366,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 _ui.value = _ui.value.copy(error = it.message ?: "播放失败")
             }
         }
+    }
+
+    // ---- 播放历史 ----
+
+    fun refreshHistory() {
+        _ui.value = _ui.value.copy(history = HistoryStore.load(getApplication()))
+    }
+
+    fun removeHistory(h: HistoryItem) {
+        _ui.value = _ui.value.copy(history = HistoryStore.remove(getApplication(), h))
     }
 
     private fun parseHeaders(raw: Any?): Map<String, String> {

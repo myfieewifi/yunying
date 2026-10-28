@@ -11,8 +11,12 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -128,6 +132,16 @@ fun HomeScreen(vm: MainViewModel = viewModel()) {
 
     // 返回键：详情→频道→首页
     BackHandler(enabled = state.screen !is Screen.Home) { vm.back() }
+
+    // 从播放器返回（ON_RESUME）时刷新播放历史
+    val activity = androidx.compose.ui.platform.LocalContext.current as? MainActivity
+    androidx.compose.runtime.DisposableEffect(activity) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, e ->
+            if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) vm.refreshHistory()
+        }
+        activity?.lifecycle?.addObserver(observer)
+        onDispose { activity?.lifecycle?.removeObserver(observer) }
+    }
 
     Scaffold(
         containerColor = YunYingColors.Background,
@@ -291,6 +305,26 @@ private fun HomePage(vm: MainViewModel, state: HomeUiState, onSubscribe: () -> U
         Spacer(Modifier.height(16.dp))
 
         LazyColumn(Modifier.fillMaxSize()) {
+            // 继续观看（播放历史：点击续播，长按删除）
+            if (state.history.isNotEmpty()) {
+                item {
+                    Spacer(Modifier.height(6.dp))
+                    SectionHeader("继续观看")
+                    Spacer(Modifier.height(10.dp))
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        contentPadding = PaddingValues(horizontal = 20.dp),
+                    ) {
+                        items(state.history) { h ->
+                            HistoryCard(
+                                h,
+                                onClick = { vm.resumeFromHistory(h) },
+                                onLongClick = { vm.removeHistory(h) },
+                            )
+                        }
+                    }
+                }
+            }
             // 推荐货架
             if (state.shelf.isNotEmpty()) {
                 item {
@@ -591,7 +625,13 @@ private fun DetailPage(vm: MainViewModel, state: HomeUiState, vod: Vod) {
                 return@DetailPage
             }
 
-            Column(Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
+            Column(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp, vertical = 12.dp)
+            ) {
                 Text(detail.vod_name, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(6.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -636,8 +676,10 @@ private fun DetailPage(vm: MainViewModel, state: HomeUiState, vod: Vod) {
                 }
                 // 线路 + 选集
                 if (state.episodes.isNotEmpty()) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        state.episodes.forEach { g ->
+                    Spacer(Modifier.height(4.dp))
+                    // 线路 chips：横向滚动，线路再多也不溢出
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        items(state.episodes) { g ->
                             val selected = g.flag == currentFlag
                             Surface(
                                 color = if (selected) YunYingColors.Accent else YunYingColors.SurfaceHigh,
@@ -656,30 +698,34 @@ private fun DetailPage(vm: MainViewModel, state: HomeUiState, vod: Vod) {
                     }
                     Spacer(Modifier.height(12.dp))
                     val group = state.episodes.firstOrNull { it.flag == currentFlag } ?: state.episodes.first()
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(4),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(bottom = 24.dp),
-                    ) {
-                        items(group.episodes) { ep ->
-                            Surface(
-                                color = YunYingColors.SurfaceHigh,
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.clickable { vm.playEpisode(group.flag, ep) },
-                            ) {
-                                Box(Modifier.fillMaxWidth().padding(vertical = 9.dp), Alignment.Center) {
-                                    Text(
-                                        ep.name,
-                                        color = Color.White, fontSize = 12.sp,
-                                        maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.padding(horizontal = 6.dp),
-                                    )
+                    // 选集：4 列普通网格，随页面整体滚动（集数多时可滚到底）
+                    group.episodes.chunked(4).forEach { rowEps ->
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            rowEps.forEach { ep ->
+                                Surface(
+                                    color = YunYingColors.SurfaceHigh,
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable { vm.playEpisode(group.flag, ep) },
+                                ) {
+                                    Box(Modifier.fillMaxWidth().padding(vertical = 9.dp), Alignment.Center) {
+                                        Text(
+                                            ep.name,
+                                            color = Color.White, fontSize = 12.sp,
+                                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.padding(horizontal = 6.dp),
+                                        )
+                                    }
                                 }
                             }
                         }
+                        Spacer(Modifier.height(8.dp))
                     }
+                    Spacer(Modifier.height(16.dp))
                 }
             }
         }
@@ -723,6 +769,50 @@ private fun VodCard(vod: Vod, onClick: () -> Unit) {
         if (!remarks.isNullOrBlank()) {
             Text(remarks, color = YunYingColors.TextTertiary, maxLines = 1, fontSize = 11.sp)
         }
+    }
+}
+
+/** 继续观看卡片：海报 + 观看进度条，点击续播，长按删除 */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun HistoryCard(h: HistoryItem, onClick: () -> Unit, onLongClick: () -> Unit) {
+    Column(Modifier.width(112.dp).combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
+        Box {
+            AsyncImage(
+                model = h.vodPic,
+                contentDescription = h.vodName,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(120.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(YunYingColors.SurfaceHigh),
+            )
+            val p = h.progress()
+            if (p > 0f) {
+                Box(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(3.dp)
+                        .background(Color(0x55FFFFFF))
+                ) {
+                    Box(Modifier.fillMaxWidth(p).height(3.dp).background(YunYingColors.Accent))
+                }
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            h.vodName, color = Color.White,
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+            fontSize = 13.sp, fontWeight = FontWeight.Medium,
+        )
+        Text(
+            "看到 ${h.episodeName}",
+            color = YunYingColors.TextTertiary,
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+            fontSize = 11.sp,
+        )
     }
 }
 

@@ -1,15 +1,27 @@
 package com.tvbox.yunying.player
 
 import android.content.Context
+import android.content.ContentValues
+import android.content.Intent
+import android.content.pm.ActivityInfo
+import android.content.res.Configuration
+import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
 import android.media.AudioManager
+import android.media.MediaRouter
+import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.provider.MediaStore
 import android.util.Log
 import android.view.*
 import android.widget.FrameLayout
 import android.widget.GridLayout
 import android.widget.ImageButton
+import android.widget.SeekBar
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
@@ -64,6 +76,9 @@ class PlayerActivity : AppCompatActivity(), PlayerEngine.PlayerListener {
         const val EXTRA_EPISODES = "episodes"
         const val EXTRA_POSITION = "position"
         const val PREF_CORE = "yunying_player_core"
+        const val EXTRA_DANMAKU_URL = "danmakuUrl"
+        const val AUTO_HIDE_MS = 5000L   // 无操作 5 秒隐藏全部控件
+        const val SKIP_PREF_PREFIX = "yunying_skip_" // 片头片尾设置 key 前缀
 
         private val SPEEDS = floatArrayOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f, 3.0f)
         private const val LONG_PRESS_MS = 600L
@@ -109,6 +124,44 @@ class PlayerActivity : AppCompatActivity(), PlayerEngine.PlayerListener {
     private var gestureBaseVolume = 0
     private var seekBaseMs = 0L
     private var seekTargetMs = 0L
+
+    // ---- 新播放界面（三端统一布局）----
+    private var topBar: LinearLayout? = null
+    private var midRow: LinearLayout? = null
+    private var bottomBar: LinearLayout? = null
+    private var seekBar: SeekBar? = null
+    private var timeLeftView: TextView? = null
+    private var timeRightView: TextView? = null
+    private var playPauseBtn: TextView? = null
+    private var danmakuView: DanmakuView? = null
+    private var danmakuUrl: String = ""
+    private var danmakuItems: List<DanmakuView.Danmaku> = emptyList()
+    private var danmakuOn = false
+    private var locked = false
+    private var isFullscreen = true
+    private var introMs = 0L        // 片头设置（0=未设置）
+    private var outroMs = 0L        // 片尾设置（0=未设置）
+    private var introSkipped = false
+
+    private val uiHandler = Handler(Looper.getMainLooper())
+    private val hideRunnable = Runnable { setControlsVisible(false) }
+    private val tickRunnable = object : Runnable {
+        override fun run() {
+            val eng = currentEngine
+            if (eng != null) {
+                val pos = eng.getCurrentPosition()
+                val dur = eng.getDuration()
+                val sb = seekBar
+                if (sb != null && !sb.isPressed) {
+                    if (dur > 0) sb.progress = ((pos.toFloat() / dur) * 1000f).toInt().coerceIn(0, 1000)
+                }
+                timeLeftView?.text = formatTime(pos)
+                timeRightView?.text = formatTime(dur)
+                playPauseBtn?.text = if (eng.isPlaying()) "⏸" else "▶"
+            }
+            uiHandler.postDelayed(this, 500)
+        }
+    }
 
     private val audioManager by lazy { getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     private val gson = Gson()
@@ -159,7 +212,8 @@ class PlayerActivity : AppCompatActivity(), PlayerEngine.PlayerListener {
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
-            useController = true
+            // 两内核（Exo/mpv）共用统一控件层，禁用 Exo 自带控制器
+            useController = false
             setShowSubtitleButton(false)
         }
         playerContainer.addView(playerView)
@@ -175,10 +229,22 @@ class PlayerActivity : AppCompatActivity(), PlayerEngine.PlayerListener {
         textureViewForMpv = tv
         playerContainer.addView(tv)
 
-        buildTopBar()
         buildOverlay()
+        buildControls()
+        danmakuUrl = intent.getStringExtra(EXTRA_DANMAKU_URL) ?: ""
+        loadSkipSettings()
         setContentView(playerContainer)
         setupGestures()
+        uiHandler.post(tickRunnable)
+        if (danmakuUrl.isNotBlank()) {
+            playerScope.launch {
+                danmakuItems = withContext(Dispatchers.IO) { DanmakuView.fetch(danmakuUrl) }
+                danmakuView?.load(danmakuItems)
+                if (danmakuItems.isEmpty()) {
+                    Toast.makeText(this@PlayerActivity, "弹幕加载为空", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
 
         // 读取内核选择并启动
         val saved = getSharedPreferences("yunying", Context.MODE_PRIVATE)
@@ -191,61 +257,487 @@ class PlayerActivity : AppCompatActivity(), PlayerEngine.PlayerListener {
         startEngine(currentType)
     }
 
-    /** 顶栏：返回 + 标题 + 选集 + ⋯（腾讯视频式） */
-    private fun buildTopBar() {
-        val topBar = LinearLayout(this).apply {
+    /** 播放界面（三端统一规范）：
+     *  顶栏：左=返回+剧名，右=投屏
+     *  中部：左列（锁定/弹幕）纵向，中=播放暂停，右列（截图/横竖屏）纵向
+     *  底上：进度条（左已播/右总时长，可拖动）
+     *  底下（从右）：选集、上一集、下一集、片头片尾、全屏/退出全屏
+     *  无操作 5 秒全部隐藏，仅显示画面；锁定时只剩解锁按钮 */
+    private fun buildControls() {
+        val density = resources.displayMetrics.density
+        fun dp(v: Int) = (v * density).toInt()
+
+        fun chipBg(active: Boolean) = GradientDrawable().apply {
+            cornerRadius = 20 * density
+            setColor(if (active) 0xFF3D7EFF.toInt() else 0x66000000.toInt())
+        }
+
+        fun textBtn(text: String, size: Float, active: Boolean = false): TextView =
+            TextView(this).apply {
+                this.text = text
+                setTextColor(if (active) Color.WHITE else 0xE6FFFFFF.toInt())
+                textSize = size
+                gravity = Gravity.CENTER
+                background = chipBg(active)
+                setPadding(dp(14), dp(8), dp(14), dp(8))
+            }
+
+        // ── 顶栏 ──
+        topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(12, 20, 12, 20)
+            setPadding(dp(12), dp(18), dp(12), dp(10))
             layoutParams = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.TOP
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP
+            )
+        }.also { bar ->
+            val back = textBtn("←", 20f).apply {
+                setPadding(dp(4), 0, dp(4), 0)
+                background = null
+                setOnClickListener { finish() }
+            }
+            titleView = TextView(this).apply {
+                text = titleText
+                setTextColor(Color.WHITE)
+                textSize = 16f
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                setPadding(dp(12), 0, dp(12), 0)
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            val cast = ImageButton(this).apply {
+                setImageResource(android.R.drawable.stat_sys_data_bluetooth) // 投屏样式位（下拉用系统投屏）
+                setColorFilter(Color.WHITE)
+                setBackgroundColor(Color.TRANSPARENT)
+                setOnClickListener { showCastDialog(it) }
+            }
+            bar.addView(back)
+            bar.addView(titleView)
+            bar.addView(cast)
+            playerContainer.addView(bar)
+        }
+
+        // ── 弹幕层（置于手势层之上、控件之下）──
+        danmakuView = DanmakuView(this).apply {
+            visibility = View.GONE
+            timeProvider = { currentEngine?.getCurrentPosition() ?: 0L }
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT
             )
         }
-        val backBtn = ImageButton(this).apply {
-            setImageResource(android.R.drawable.ic_menu_revert)
-            setBackgroundColor(Color.TRANSPARENT)
-            setOnClickListener { finish() }
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
+        playerContainer.addView(danmakuView)
+
+        // ── 中部行：左列（锁定/弹幕）| 中（播放暂停）| 右列（截图/横竖屏）──
+        midRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT
             )
+            setPadding(dp(14), dp(60), dp(14), dp(140)) // 避开顶栏/底栏
+        }.also { mid ->
+            // 左列：锁定 / 弹幕（纵向）
+            val leftCol = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            val lockBtn = textBtn("🔒", 16f).apply {
+                setOnClickListener { toggleLock() }
+            }
+            val danmakuBtn = textBtn("弹", 14f).apply {
+                setOnClickListener { toggleDanmaku() }
+            }
+            leftCol.addView(lockBtn)
+            leftCol.addView(danmakuBtn, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(16) })
+
+            // 中：播放/暂停
+            val playBtn = textBtn("▶", 26f).apply {
+                setPadding(dp(22), dp(16), dp(22), dp(22))
+                setOnClickListener { togglePlayPause() }
+            }
+            playPauseBtn = playBtn
+
+            // 右列：截图 / 横竖屏（纵向）
+            val rightCol = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            val shotBtn = textBtn("📷", 16f).apply {
+                setOnClickListener { takeScreenshot() }
+            }
+            val rotateBtn = textBtn("⇄", 18f).apply {
+                setOnClickListener { toggleScreenOrientation() }
+            }
+            rightCol.addView(shotBtn)
+            rightCol.addView(rotateBtn, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(16) })
+
+            mid.addView(leftCol, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT))
+            mid.addView(playBtn, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                gravity = Gravity.CENTER
+            })
+            mid.addView(rightCol, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
+                gravity = Gravity.END or Gravity.CENTER_VERTICAL
+            })
+            playerContainer.addView(mid)
         }
-        titleView = TextView(this).apply {
-            text = titleText
+
+        // ── 底部容器：靠上进度条 + 靠下按钮行 ──
+        bottomBar = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(6), dp(16), dp(14))
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM
+            )
+        }.also { bot ->
+            // 进度条行（靠上）
+            val seekRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            timeLeftView = TextView(this).apply {
+                text = "00:00"
+                setTextColor(0xFF9A9AAC.toInt())
+                textSize = 11f
+            }
+            seekBar = SeekBar(this).apply {
+                max = 1000
+                progress = 0
+                val pad = dp(40)
+                setPadding(pad, 0, pad, 0)
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    setMargins(dp(8), 0, dp(8), 0)
+                }
+                thumbTintList = android.content.res.ColorStateList.valueOf(0xFF3D7EFF.toInt())
+                progressTintList = android.content.res.ColorStateList.valueOf(0xFF3D7EFF.toInt())
+                setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
+                        if (fromUser) poke()
+                    }
+                    override fun onStartTrackingTouch(sb: SeekBar?) { poke() }
+                    override fun onStopTrackingTouch(sb: SeekBar?) {
+                        val dur = currentEngine?.getDuration() ?: 0L
+                        if (dur > 0) {
+                            currentEngine?.seekTo(sb?.progress?.let { it.toLong() * dur / 1000 } ?: 0)
+                        }
+                        findControlsVisible(true)
+                        poke()
+                    }
+                })
+            }
+            timeRightView = TextView(this).apply {
+                text = "00:00"
+                setTextColor(0xFF9A9AAC.toInt())
+                textSize = 11f
+            }
+            seekRow.addView(timeLeftView)
+            seekRow.addView(seekBar)
+            seekRow.addView(timeRightView)
+
+            // 按钮行（靠下，从右：选集、上一集、下一集、片头片尾、全屏）
+            val actionsRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.END or Gravity.CENTER_VERTICAL
+            }.also { row ->
+                fun act(label: String, idTag: String, onClick: () -> Unit) {
+                    row.addView(textBtn(label, 13f).apply {
+                        tag = idTag
+                        marginEnd = dp(10)
+                        layoutParams = (layoutParams as LinearLayout.LayoutParams).apply { marginEnd = dp(10) }
+                        setOnClickListener { onClick(); poke() }
+                    })
+                }
+                act("选集", "episodes") { showEpisodeDialog() }
+                act("上一集", "prev") { gotoEpisode(-1) }
+                act("下一集", "next") { gotoEpisode(1) }
+                act("片头片尾", "skip") { setupSkipDialog() }
+                val coreBtn = textBtn("内核·${coreName(currentType)}", 13f).apply {
+                    setOnClickListener {
+                        switchCore()
+                        (it as TextView).text = "内核·${coreName(currentType)}"
+                    }
+                }
+                row.addView(coreBtn)
+                val fullscreen = textBtn(if (isFullscreen) "退出全屏" else "全屏", 13f).apply {
+                    setOnClickListener {
+                        toggleFullscreen()
+                        (it as TextView).text = if (isFullscreen) "退出全屏" else "全屏"
+                    }
+                }
+                row.addView(fullscreen)
+            }
+
+            bot.addView(seekRow)
+            bot.addView(actionsRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10) })
+            playerContainer.addView(bot)
+        }
+
+        // 锁定后浮动解锁按钮（锁定时唯一可见控件）
+        val unlockChip = TextView(this).apply {
+            text = "🔓"
+            textSize = 18f
             setTextColor(Color.WHITE)
-            textSize = 16f
-            maxLines = 1
-            ellipsize = android.text.TextUtils.TruncateAt.END
-            setPadding(16, 0, 16, 0)
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            gravity = Gravity.CENTER
+            background = chipBg(true)
+            setPadding(dp(16), dp(10), dp(16), dp(10))
+            visibility = View.GONE
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            ).apply { topMargin = dp(60) }
+            setOnClickListener {
+                locked = false
+                playerContainer.locked = false
+                visibility = View.GONE
+                setControlsVisible(true); poke()
+                Toast.makeText(this, "已解锁操作", Toast.LENGTH_SHORT).show()
+            }
         }
-        val epBtn = TextView(this).apply {
-            text = "选集"
-            setTextColor(Color.WHITE)
-            textSize = 14f
-            setPadding(20, 8, 20, 8)
-            setOnClickListener { showEpisodeDialog() }
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
+        playerContainer.addView(unlockChip)
+        unlockChipBtn = unlockChip
+
+        findControlsVisible(true)
+        poke()
+    }
+
+    private var unlockChipBtn: TextView? = null
+
+    /** 控件显隐总开关（锁定时只留解锁按钮） */
+    private fun setControlsVisible(show: Boolean) {
+        val vis = if (show) View.VISIBLE else View.GONE
+        if (locked) {
+            topBar?.visibility = View.GONE
+            midRow?.visibility = View.GONE
+            bottomBar?.visibility = View.GONE
+            unlockChipBtn?.visibility = View.VISIBLE
+        } else {
+            topBar?.visibility = vis
+            midRow?.visibility = vis
+            bottomBar?.visibility = vis
+            unlockChipBtn?.visibility = View.GONE
+        }
+    }
+
+    private fun findControlsVisible(@Suppress("UNUSED_PARAMETER") show: Boolean) {
+        setControlsVisible(true)
+    }
+
+    /** 无操作计时 */
+    private fun poke() {
+        uiHandler.removeCallbacks(hideRunnable)
+        setControlsVisible(true)
+        uiHandler.postDelayed(hideRunnable, AUTO_HIDE_MS)
+    }
+
+    // ================= 新规范功能 =================
+
+    /** 锁定/解锁：锁定后屏蔽手势，只留解锁浮钮 */
+    private fun toggleLock() {
+        locked = !locked
+        playerContainer.locked = locked
+        setControlsVisible(!locked)
+        if (locked) {
+            unlockChipBtn?.visibility = View.VISIBLE
+            uiHandler.removeCallbacks(hideRunnable)
+            Toast.makeText(this, "已锁定，播放不会被手势打断", Toast.LENGTH_SHORT).show()
+        } else {
+            unlockChipBtn?.visibility = View.GONE
+            poke()
+            Toast.makeText(this, "已解锁", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /** 弹幕开关（无源时提示） */
+    private fun toggleDanmaku() {
+        if (danmakuUrl.isBlank()) {
+            Toast.makeText(this, "暂无弹幕源，该站点未提供弹幕", Toast.LENGTH_SHORT).show()
+            return
+        }
+        danmakuOn = !danmakuOn
+        danmakuView?.setEnabled(danmakuOn)
+        Toast.makeText(this, if (danmakuOn) "弹幕已开启（${danmakuItems.size}条）" else "弹幕已关闭", Toast.LENGTH_SHORT).show()
+    }
+
+    /** 播放/暂停切换 */
+    private fun togglePlayPause() {
+        val eng = currentEngine ?: return
+        if (eng.isPlaying()) { eng.pause(); Toast.makeText(this, "已暂停", Toast.LENGTH_SHORT).show() }
+        else { eng.play(); Toast.makeText(this, "继续播放", Toast.LENGTH_SHORT).show() }
+    }
+
+    /** 截图：TextureView 直接取位图；SurfaceView（Exo）走 PixelCopy → 存入相册 */
+    private fun takeScreenshot() {
+        val eng = currentEngine ?: return
+        val density = resources.displayMetrics.density
+        fun savedToast(u: Uri?) =
+            Toast.makeText(this, if (u != null) "截图已保存到相册" else "截图失败", Toast.LENGTH_SHORT).show()
+
+        fun storeBitmap(bmp: Bitmap) {
+            playerScope.launch {
+                val uri = withContext(Dispatchers.IO) {
+                    runCatching {
+                        val values = ContentValues().apply {
+                            put(MediaStore.MediaColumns.DISPLAY_NAME, "yunying_${System.currentTimeMillis()}.png")
+                            put(MediaStore.MediaColumns.MIME_TYPE, "image/png")
+                            put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/YunYing")
+                        }
+                        val u = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)!!
+                        contentResolver.openOutputStream(u)!!.use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                        u
+                    }.getOrNull()
+                }
+                savedToast(uri)
+            }
+        }
+
+        if (eng is ExoPlayerEngine) {
+            val sv = playerView.videoSurfaceView ?: run { Toast.makeText(this, "暂无画面可截取", Toast.LENGTH_SHORT).show(); return }
+            val bmp = Bitmap.createBitmap(sv.width.coerceAtLeast(1), sv.height.coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+            val loc = IntArray(2); sv.getLocationInWindow(loc)
+            try {
+                PixelCopy.request(sv.window, Rect(loc[0], loc[1], loc[0] + sv.width, loc[1] + sv.height), bmp, { r -> if (r == PixelCopy.SUCCESS) storeBitmap(bmp) }, Handler(Looper.getMainLooper()))
+            } catch (t: Throwable) {
+                Log.e("PlayerActivity", "PixelCopy 失败", t)
+            }
+        } else {
+            val tv = textureViewForMpv
+            val bmp = tv?.bitmap
+            if (bmp == null) {
+                Toast.makeText(this, "暂无画面可截取", Toast.LENGTH_SHORT).show()
+            } else storeBitmap(bmp)
+        }
+        Toast.makeText(this, "正在截取画面…", Toast.LENGTH_SHORT).show()
+    }
+
+    /** 横竖屏切换 */
+    private fun toggleScreenOrientation() {
+        val target = if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE)
+            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT else ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        requestedOrientation = target
+        Toast.makeText(this, if (target == ActivityInfo.SCREEN_ORIENTATION_PORTRAIT) "切换到竖屏" else "切换到横屏", Toast.LENGTH_SHORT).show()
+    }
+
+    /** 全屏/退出全屏：退出=竖屏 + 16:9 顶置；恢复=全屏横屏 */
+    private fun toggleFullscreen() {
+        isFullscreen = !isFullscreen
+        val vui = playerView
+        if (isFullscreen) {
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            vui.layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT
+            )
+            midRow?.setPadding(
+                (14 * resources.displayMetrics.density).toInt(),
+                (60 * resources.displayMetrics.density).toInt(),
+                (14 * resources.displayMetrics.density).toInt(),
+                (140 * resources.displayMetrics.density).toInt()
+            )
+        } else {
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            val w = resources.displayMetrics.widthPixels
+            vui.layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, (w * 9 / 16)
+            )
+            midRow?.setPadding(
+                (14 * resources.displayMetrics.density).toInt(),
+                (16 * resources.displayMetrics.density).toInt(),
+                (14 * resources.displayMetrics.density).toInt(),
+                (60 * resources.displayMetrics.density).toInt()
             )
         }
-        val menuBtn = ImageButton(this).apply {
-            setImageResource(android.R.drawable.ic_menu_more)
-            setBackgroundColor(Color.TRANSPARENT)
-            setOnClickListener { showPlayerMenu(it) }
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
+    }
+
+    /** 上一集/下一集 */
+    private fun gotoEpisode(delta: Int) {
+        if (episodes.isEmpty()) {
+            Toast.makeText(this, "暂无选集信息", Toast.LENGTH_SHORT).show()
+            return
         }
-        topBar.addView(backBtn)
-        topBar.addView(titleView)
-        topBar.addView(epBtn)
-        topBar.addView(menuBtn)
-        playerContainer.addView(topBar)
+        val idx = episodes.indexOfFirst { it.id == episodeId }
+        val target = episodes.getOrNull(idx + delta)
+        if (target == null) {
+            Toast.makeText(this, if (delta < 0) "已经是第一集" else "已经是最后一集", Toast.LENGTH_SHORT).show()
+            return
+        }
+        playEpisodeDirect(target)
+    }
+
+    /** 投屏：系统 MediaRouter 路由探测 + 路由选择；无可用路由时引导到系统投屏设置 */
+    private fun showCastDialog(anchor: View) {
+        val router = getSystemService(Context.MEDIA_ROUTER_SERVICE) as MediaRouter
+        val routes = router.routes.toList()
+        if (routes.isEmpty()) {
+            AlertDialog.Builder(this)
+                .setTitle("投屏")
+                .setMessage("当前未发现可投屏的设备。\n\n请确认手机与目标设备在同一 Wi-Fi，或使用系统投屏（设置 → 连接与共享 → 投屏）后重试。")
+                .setPositiveButton("打开系统投屏") { _, _ ->
+                    runCatching {
+                        startActivity(Intent("android.settings.CAST_SETTINGS")
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }
+                }
+                .setNegativeButton("关闭", null)
+                .show()
+            return
+        }
+        val items = routes.map { r -> "📺 ${r.name}" }
+        AlertDialog.Builder(this)
+            .setTitle("投屏到…")
+            .setItems(items.toTypedArray()) { _, which ->
+                val route = routes[which]
+                route.select()
+                Toast.makeText(this, "已切换输出：${route.name}", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    /** 片头片尾设置弹窗（本剧本地保存 ds 单位秒） */
+    private fun setupSkipDialog() {
+        val v = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding((24 * resources.displayMetrics.density).toInt(), (16 * resources.displayMetrics.density).toInt(), (24 * resources.displayMetrics.density).toInt(), 0) }
+        fun field(label: String, value: Long): Pair<TextView, EditText> {
+            val lab = TextView(this).apply { text = label; setTextColor(Color.WHITE); textSize = 13f }
+            val et = EditText(this).apply {
+                setText((value / 1000).let { if (it > 0) it.toString() else "" })
+                hint = "秒"
+                inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            }
+            v.addView(lab); v.addView(et)
+            return lab to et
+        }
+        val introEt = field("跳过片头时间", introMs).second
+        val outroEt = field("跳过片尾时间", outroMs).second
+        AlertDialog.Builder(this)
+            .setTitle("设置片头片尾")
+            .setView(v)
+            .setPositiveButton("保存") { _, _ ->
+                introMs = (introEt.text.toString().trim().toLongOrNull() ?: 0L) * 1000
+                outroMs = (outroEt.text.toString().trim().toLongOrNull() ?: 0L) * 1000
+                saveSkipSettings()
+                Toast.makeText(this, "已保存：片头${introMs / 1000}秒 / 片尾${outroMs / 1000}秒", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("直接跳过片头") { d, _ ->
+                d.dismiss()
+                if (introMs > 0) { currentEngine?.seekTo(introMs); Toast.makeText(this, "已跳过片头", Toast.LENGTH_SHORT).show() }
+                else Toast.makeText(this, "尚未设置片头时长", Toast.LENGTH_SHORT).show()
+            }
+            .setNeutralButton("取消", null)
+            .show()
+        // 点按钮行里的「片头片尾」= 跳过片头（快速），长按进设置
+    }
+
+    private fun skipSettingsKey(): String = SKIP_PREF_PREFIX + siteIndex + "_" + vodId
+
+    private fun loadSkipSettings() {
+        val sp = getSharedPreferences("yunying", Context.MODE_PRIVATE)
+        introMs = sp.getLong(skipSettingsKey() + "_intro", 0L)
+        outroMs = sp.getLong(skipSettingsKey() + "_outro", 0L)
+    }
+
+    private fun saveSkipSettings() {
+        getSharedPreferences("yunying", Context.MODE_PRIVATE).edit()
+            .putLong(skipSettingsKey() + "_intro", introMs)
+            .putLong(skipSettingsKey() + "_outro", outroMs)
+            .apply()
     }
 
     /** 手势指示浮层：圆角黑底 + 文字 + 进度条 */
@@ -328,14 +820,14 @@ class PlayerActivity : AppCompatActivity(), PlayerEngine.PlayerListener {
         }
         playerContainer.onLongPressStart = {
             val eng = currentEngine
-            if (eng is ExoPlayerEngine) {
+            if (eng != null) {
                 boosting = true
                 savedSpeed = currentSpeed
                 eng.setSpeed(BOOST_SPEED)
                 showOverlay("⚡ ${BOOST_SPEED}倍速快进中", null)
             } else {
                 boosting = false
-                showOverlay("当前内核不支持长按倍速", null)
+                showOverlay("当前无可用内核", null)
             }
         }
         playerContainer.onLongPressEnd = {
@@ -343,6 +835,17 @@ class PlayerActivity : AppCompatActivity(), PlayerEngine.PlayerListener {
                 boosting = false
                 currentEngine?.setSpeed(savedSpeed)
                 hideOverlayDelayed()
+            }
+        }
+        playerContainer.onSingleTap = {
+            if (locked) {
+                Toast.makeText(this, "已锁定，可点击顶部解锁按钮", Toast.LENGTH_SHORT).show()
+            } else if (topBar?.visibility == View.VISIBLE) {
+                // 已显示 → 立即隐藏（提前于 5 秒计时）
+                uiHandler.removeCallbacks(hideRunnable)
+                setControlsVisible(false)
+            } else {
+                poke()
             }
         }
     }
@@ -608,6 +1111,11 @@ class PlayerActivity : AppCompatActivity(), PlayerEngine.PlayerListener {
     }
 
     override fun onPause() {
+        // 长按倍速兜底：任何路径漏掉恢复都不允许把 3x 带入后台
+        if (boosting) {
+            boosting = false
+            currentEngine?.setSpeed(savedSpeed)
+        }
         saveHistory(finished = false)
         super.onPause()
     }
@@ -681,6 +1189,9 @@ class GestureLayout(context: Context) : FrameLayout(context) {
     var onHorizontalScroll: ((dxPercent: Float) -> Unit)? = null
     var onGestureEnd: ((mode: Int) -> Unit)? = null
     var onSingleTap: (() -> Unit)? = null
+    /** 锁定状态：屏蔽全部手势（解锁由浮层按钮触发） */
+    var locked = false
+    var onSingleTap: (() -> Unit)? = null
     var onLongPressStart: (() -> Unit)? = null
     var onLongPressEnd: (() -> Unit)? = null
 
@@ -702,7 +1213,11 @@ class GestureLayout(context: Context) : FrameLayout(context) {
         downX = ev.x; downY = ev.y; lastX = ev.x; lastY = ev.y
         mode = 0
         longPressFired = false
-        postDelayed(longPressRunnable, 600L)
+        if (locked) {
+            // 锁定：不启动长按计时
+            return
+        }
+        postDelayed(longPressRunnable, LONG_PRESS_MS)
     }
 
     private fun decideMode(ev: MotionEvent): Boolean {
@@ -733,6 +1248,13 @@ class GestureLayout(context: Context) : FrameLayout(context) {
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 removeCallbacks(longPressRunnable)
+                // 长按倍速的收尾必须放在拦截路径里：boost 后手指滑动会使本布局
+                // 拦截事件流，此刻 UP/CANCEL 只会经过这里而不再进入 onTouchEvent，
+                // 不补 onLongPressEnd 会导致恢复不了原速（一直卡 3x）
+                if (longPressFired) {
+                    longPressFired = false
+                    onLongPressEnd?.invoke()
+                }
                 if (mode != 0) {
                     onGestureEnd?.invoke(mode)
                     mode = 0
@@ -749,7 +1271,10 @@ class GestureLayout(context: Context) : FrameLayout(context) {
                 initDown(ev)
             }
             MotionEvent.ACTION_MOVE -> {
-                decideMode(ev)
+                if (locked || !decideMode(ev)) {
+                    lastX = ev.x; lastY = ev.y
+                    return true
+                }
                 if (mode == MODE_VERTICAL) {
                     val dy = lastY - ev.y
                     onVerticalScroll?.invoke(

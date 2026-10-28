@@ -1,0 +1,97 @@
+/* ============================================================
+   云映 · 设计令牌 v1.0（三平台统一：iOS / Android / HarmonyOS）
+   种子色 #3D7EFF（腾讯蓝 hue 220）· 深色主题优先（播放器类）
+   WCAG 对比度已自检：正文 ≥4.5:1，图标/大字 ≥3:1
+   ============================================================ */
+
+:root {
+  color-scheme: dark;
+
+  /* ---- 主色阶（primary · hue 220）---- */
+  --primary-50:  #ebf1ff;
+  --primary-100: #d6e4ff;
+  --primary-200: #adc9ff;
+  --primary-300: #89affa;
+  --primary-400: #6c9bf9;
+  --primary-500: #4580f7; /* 种子色档；大面积/色块用 */
+  --primary-600: #1e66f6; /* 按钮底（白字 4.90:1 ✓）*/
+  --primary-700: #0951e1;
+  --primary-800: #0740b0;
+  --primary-900: #063289;
+  --primary-950: #042058;
+
+  /* tint 档：深底文字上的强调（深底对比 9.4~15.3 ✓）*/
+  --primary-tint-100: #d9e5fc;
+  --primary-tint-200: #bbd1fb;
+  --primary-tint-300: #92b5fc;
+
+  /* ---- 深色背景 / 表面 ---- */
+  --bg-0:        #0a0e14;  /* 页面底 */
+  --bg-1:        #121722;  /* surface-1：卡片 */
+  --bg-2:        #1a2130;  /* surface-2：浮层/面板 */
+  --bg-3:        #232c3f;  /* surface-3：悬浮元素 */
+
+  /* ---- 文本（中性白系，稳）---- */
+  --text-primary:   rgba(255,255,255,.88);   /* 15.6:1 on bg-0 */
+  --text-secondary: rgba(255,255,255,.60);   /*  7.5:1 on bg-0 */
+  --text-disabled:  rgba(255,255,255,.38);
+  --text-on-accent: #ffffff;                 /* 用于 --primary-600+ 底 */
+
+  /* ---- 语义色 ---- */
+  --success-500: #50e285;  /* bg 对比 11.6 ✓ */
+  --warning-500: #e1a847;  /* bg 对比  9.1 ✓ */
+  --danger-500:  #e25050;  /* bg 对比  5.1 ✓ */
+  --info-500:    #588ee4;  /* bg 对比  5.9 ✓ */
+
+  /* ---- 播放器专用令牌（三端统一布局对齐以下命名）---- */
+  --player-scrim-top:    rgba(0,0,0,.55);   /* 顶栏渐变遮罩 */
+  --player-scrim-bottom: rgba(0,0,0,.65);   /* 底栏渐变遮罩 */
+  --player-control-fg:   rgba(255,255,255,.92);
+  --player-control-dim:  rgba(255,255,255,.55);
+  --player-accent:       var(--primary-500); /* 进度条已播/高亮 */
+  --player-track:        rgba(255,255,255,.30);
+  --player-chip-bg:      rgba(30,33,48,.92); /* 底部胶囊按钮底 */
+  --player-chip-active:  var(--primary-600);
+  --player-panel-bg:     rgba(18,23,34,.96); /* 选集/倍速半屏面板 */
+
+  /* ---- 字号阶梯 ---- */
+  --font-xs: 11px;  /* 辅助说明/角标 */
+  --font-sm: 13px;  /* 次要文本/胶囊标签 */
+  --font-md: 15px;  /* 正文/按钮 */
+  --font-lg: 17px;  /* 标题/剧名 */
+  --font-xl: 22px;  /* 大标题/logo */
+
+  /* ---- 间距（4 基准）---- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+
+  /* ---- 圆角 ---- */
+  --radius-sm: 8px;   /* 小按钮/输入 */
+  --radius-md: 12px;  /* 卡片 */
+  --radius-lg: 16px;  /* 面板 */
+  --radius-full: 999px; /* 胶囊 */
+
+  /* ---- 动效 ---- */
+  --dur-fast: 120ms;   /* 点按反馈 */
+  --dur-base: 200ms;   /* 常规过渡 */
+  --dur-slow: 300ms;   /* 面板出入场 */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.3, 1);
+  --player-hide-delay: 5s; /* 无操作 5 秒隐藏所有控件 */
+}
+
+/* ---- 浅色主题（预留，播放器不使用）---- */
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg-0: #f5f7fb;
+    --bg-1: #ffffff;
+    --bg-2: #eef1f7;
+    --bg-3: #e3e8f1;
+    --text-primary: rgba(17,24,39,.92);
+    --text-secondary: rgba(17,24,39,.62);
+    --text-disabled: rgba(17,24,39,.36);
+  }
+}

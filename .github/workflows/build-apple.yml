@@ -20,8 +20,19 @@ jobs:
 
       - name: Clone yingxia-src if not submodule
         run: |
+          # 上游漂移会击穿 exact-text 补丁，必须锁定到验证过的提交。
+          # bump 时：先在本地用新 ios16.py 干跑通过，再改这个 SHA。
+          PIN=26cfc70df210295294519f6423bb83bb219af1f7
           if [ ! -d yingxia-src/Sources ]; then
-            git clone --depth=1 https://github.com/jo32/tvbox-silicon.git yingxia-src
+            rm -rf yingxia-src
+            if git init yingxia-src 2>/dev/null && \
+               git -C yingxia-src fetch --depth=1 https://github.com/jo32/tvbox-silicon.git "$PIN" 2>/dev/null && \
+               git -C yingxia-src checkout --force FETCH_HEAD 2>/dev/null; then
+              echo "✓ upstream pinned at $PIN"
+            else
+              echo "!! SHA fetch failed, falling back to depth-1 main (漂移风险)"
+              git clone --depth=1 https://github.com/jo32/tvbox-silicon.git yingxia-src
+            fi
           fi
 
       - name: Apply YunYing patches

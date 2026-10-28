@@ -442,6 +442,8 @@ def process_file(path):
     text = rewrite_zero_param_onchange(text)
     # transition(.blurReplace) 需要 iOS 17；iOS 16 用普通 opacity 过渡
     text = text.replace('.transition(.blurReplace)', '.transition(.opacity)')
+    # navigationDestination(item:) 需要 iOS 17；iOS 16 用 sheet(item:)（Route 本就 Identifiable）
+    text = re.sub(r'\.navigationDestination\(item:', '.sheet(item:', text)
     # ScrollView 无参尾闭调用在 Xcode 26 SDK 下与 init(_:content:) 新候选二义；
     # 显式 showsIndicators 让新候选不适用（它没有该参数）
     text = re.sub(r'(?<![\w.])ScrollView \{', 'ScrollView(.vertical, showsIndicators: true) {', text)
@@ -1180,6 +1182,7 @@ def main():
                     'import Observation', 'scrollTargetLayout',
                     'sensoryFeedback', 'ContentUnavailableView(',
                     '.numericText(', '.blurReplace', '.contentMargins(',
+                    'navigationDestination(item:',
                     'toolbar { ToolbarItem', '.symbolEffect(.bounce', '.symbolEffect(.variableColor'):
             if bad in text and 'Shims' not in path.name:
                 warnings.append(f'{path.name}: residual "{bad}"')

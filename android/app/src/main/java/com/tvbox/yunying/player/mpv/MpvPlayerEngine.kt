@@ -121,7 +121,8 @@ class MpvPlayerEngine(private val context: Context) : PlayerEngine {
     private fun setupSurface(st: SurfaceTexture, w: Int, h: Int) {
         surface = Surface(st)
         try {
-            mpv?.attachSurface(surface)
+            val s = surface
+            s?.let { mpv?.attachSurface(it) }
             mpv?.setPropertyString("android-surface-size", "${w}x$h")
         } catch (e: Throwable) {
             Log.e(TAG, "attachSurface 失败", e)

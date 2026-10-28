@@ -9,8 +9,8 @@ import android.view.Surface
 import android.view.TextureView
 import com.tvbox.yunying.player.PlayerEngine
 import com.tvbox.yunying.player.PlayerEngine.PlayerListener
-import is.xyz.mpv.MPV
-import is.xyz.mpv.MPVNode
+import `is`.xyz.mpv.MPV
+import `is`.xyz.mpv.MPVNode
 
 /**
  * mpv 播放器内核封装（直调 mpv-android-lib AAR：io.github.abdallahmehiz:mpv-android-lib）。

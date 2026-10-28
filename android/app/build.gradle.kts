@@ -127,9 +127,10 @@ dependencies {
     implementation("com.github.thegrizzlylabs:sardine-android:0.9")
     implementation("org.slf4j:slf4j-api:1.7.36")
 
-    // mpv 内核（libmpv）——预编译 AAR，CI/本地手动下载放到 android/app/libs/ 下，文件名匹配 libmpv*.aar
-    // mpv-android 官方 Release 只发布 APK，没有稳定 AAR 坐标，因此不提供 Maven 兜底依赖；
-    // MpvPlayerEngine 为纯反射实现：没有 libmpv 时编译/打包不受影响，运行时优雅回退 ExoPlayer
+    // mpv 内核（libmpv）——预编译 AAR，CI/本地由 android/scripts/download-mpv.sh 从 Maven Central 下载到 app/libs/，文件名匹配 libmpv*.aar
+    // 来源：io.github.abdallahmehiz:mpv-android-lib（mpvKt 所用内核，含 libmpv.so + libplayer.so JNI 桥 + ffmpeg，全 ABI）
+    // mpv-android 官方 Release 只发布 APK，无 AAR，不能作为依赖来源；
+    // MpvPlayerEngine 为软降级实现：AAR 缺失时编译失败（可临时注释本行），运行时 so 加载失败自动回退 ExoPlayer
     implementation(fileTree("libs") { include("libmpv*.aar") })
 
     // HTML 解析（爬虫常用）

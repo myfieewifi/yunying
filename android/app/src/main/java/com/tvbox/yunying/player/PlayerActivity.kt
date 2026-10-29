@@ -601,7 +601,14 @@ class PlayerActivity : AppCompatActivity(), PlayerEngine.PlayerListener {
             }
             val bmp = Bitmap.createBitmap(sv.width.coerceAtLeast(1), sv.height.coerceAtLeast(1), Bitmap.Config.ARGB_8888)
             try {
-                PixelCopy.request(sv, bmp, { r -> if (r == PixelCopy.SUCCESS) storeBitmap(bmp) }, Handler(Looper.getMainLooper()))
+                val listener = android.view.PixelCopy.OnPixelCopyFinishedListener { r ->
+                    if (r == android.view.PixelCopy.SUCCESS) storeBitmap(bmp)
+                }
+                if (android.os.Build.VERSION.SDK_INT >= 29) {
+                    android.view.PixelCopy.request(sv, bmp, listener, mainExecutor)
+                } else if (sv is android.view.SurfaceView) {
+                    android.view.PixelCopy.request(sv, bmp, listener, Handler(Looper.getMainLooper()))
+                }
             } catch (t: Throwable) {
                 Log.e("PlayerActivity", "PixelCopy 失败", t)
             }
@@ -1178,7 +1185,6 @@ class GestureLayout(context: Context) : FrameLayout(context) {
     var onSingleTap: (() -> Unit)? = null
     /** 锁定状态：屏蔽全部手势（解锁由浮层按钮触发） */
     var locked = false
-    var onSingleTap: (() -> Unit)? = null
     var onLongPressStart: (() -> Unit)? = null
     var onLongPressEnd: (() -> Unit)? = null
 

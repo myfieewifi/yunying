@@ -305,10 +305,11 @@ class PlayerActivity : AppCompatActivity(), PlayerEngine.PlayerListener {
                 setPadding(dp(12), 0, dp(12), 0)
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             }
-            val cast = ImageButton(this).apply {
-                setImageResource(android.R.drawable.stat_sys_data_bluetooth) // 投屏样式位（下拉用系统投屏）
-                setColorFilter(Color.WHITE)
-                setBackgroundColor(Color.TRANSPARENT)
+            val cast = TextView(this).apply {
+                text = "投"
+                textSize = 16f
+                setTextColor(Color.WHITE)
+                gravity = Gravity.CENTER
                 setOnClickListener { showCastDialog(it) }
             }
             bar.addView(back)

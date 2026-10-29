@@ -68,7 +68,6 @@ struct VodPlayer {
   @State showSpeedPanel: boolean = false;
   @State showEpPanel: boolean = false;
   @State showSkipPanel: boolean = false;
-  @State showCastPanel: boolean = false;
   @State speedIndex: number = SPEED_DEFAULT;
 
   // 新规范状态
@@ -354,19 +353,7 @@ struct VodPlayer {
 
   /** 投屏：HarmonyOS 走系统分布式投屏入口引导 */
   private showCastPanel(): void {
-    this.showCastPanelFlag();
-  }
-
-  private showCastPanelFlag(): void {
-    this.showCastPanelState(true);
-  }
-
-  private showCastPanelState(v: boolean): void {
-    this.showCastPanelFlagInner(v);
-  }
-
-  private showCastPanelFlagInner(v: boolean): void {
-    this.castPanelVisible = v;
+    this.castPanelVisible = true;
     this.controlsVisible = true;
   }
 
@@ -384,9 +371,9 @@ struct VodPlayer {
 
   private loadSkipSettings(): void {
     // 使用 AppStorage 简存（本剧级，key 含 vodId）
-    const v = AppStorage.get<number | undefined>(`intro_${PlaySession.vodId}`);
+    const v = AppStorage.get<number>(`intro_${PlaySession.vodId}`);
     this.introSec = v === undefined ? 0 : v;
-    const o = AppStorage.get<number | undefined>(`outro_${PlaySession.vodId}`);
+    const o = AppStorage.get<number>(`outro_${PlaySession.vodId}`);
     this.outroSec = o === undefined ? 0 : o;
   }
 

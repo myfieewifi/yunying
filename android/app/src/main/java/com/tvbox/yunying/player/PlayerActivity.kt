@@ -604,10 +604,10 @@ class PlayerActivity : AppCompatActivity(), PlayerEngine.PlayerListener {
                 val listener = android.view.PixelCopy.OnPixelCopyFinishedListener { r ->
                     if (r == android.view.PixelCopy.SUCCESS) storeBitmap(bmp)
                 }
-                if (android.os.Build.VERSION.SDK_INT >= 29) {
-                    android.view.PixelCopy.request(sv, bmp, listener, mainExecutor)
-                } else if (sv is android.view.SurfaceView) {
+                if (sv is android.view.SurfaceView) {
                     android.view.PixelCopy.request(sv, bmp, listener, Handler(Looper.getMainLooper()))
+                } else {
+                    Toast.makeText(this, "该画面类型暂不支持截取", Toast.LENGTH_SHORT).show()
                 }
             } catch (t: Throwable) {
                 Log.e("PlayerActivity", "PixelCopy 失败", t)

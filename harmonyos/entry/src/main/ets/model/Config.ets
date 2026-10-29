@@ -1,6 +1,7 @@
 import common from '@ohos.app.ability.common';
 import http from '@ohos.net.http';
 import dataPreferences from '@ohos.data.preferences';
+import window from '@ohos.window';
 import { BusinessError } from '@ohos.base';
 
 /**
@@ -8,6 +9,8 @@ import { BusinessError } from '@ohos.base';
  */
 export class Global {
   static context: common.Context | null = null;
+  /** 主窗口（EntryAbility.onWindowStageCreate 注入，横竖屏/投屏用） */
+  static mainWindow: window.Window | undefined = undefined;
 }
 
 /**

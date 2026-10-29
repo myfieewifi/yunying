@@ -15,6 +15,14 @@ export default class EntryAbility extends UIAbility {
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
+    // 注入主窗口（横竖屏切换/投屏引导用）
+    windowStage.getMainWindow((err: BusinessError, win: window.Window) => {
+      if (err.code) {
+        console.error(`getMainWindow failed: ${err.code} ${err.message}`);
+      } else {
+        Global.mainWindow = win;
+      }
+    });
     windowStage.loadContent('pages/Index', (err: BusinessError) => {
       if (err.code) {
         console.error(`loadContent failed: ${err.code} ${err.message}`);

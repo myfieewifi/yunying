@@ -668,52 +668,13 @@ class PlayerActivity : AppCompatActivity(), PlayerEngine.PlayerListener {
         playEpisodeDirect(target)
     }
 
-    /** 投屏：系统 MediaRouter2 路由探测 + 路由选择；无可用路由时打开系统投屏设置 */
+    /** 投屏：androidx.mediarouter 官方路由选择器（真实功能：扫描并投屏到路由接收端/Chromecast 等） */
     private fun showCastDialog(anchor: View) {
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-            try {
-                val router = android.media.MediaRouter2.getInstance(this)
-                val routes = router.routes
-                if (routes.isEmpty()) {
-                    openSystemCastSettings()
-                    return
-                }
-                val items = routes.map { r -> "📺 ${r.name}" }
-                AlertDialog.Builder(this)
-                    .setTitle("投屏到…")
-                    .setItems(items.toTypedArray()) { d, which ->
-                        val route = routes[which]
-                        try {
-                            router.selectRoute(route)
-                            Toast.makeText(this, "已切换输出：${route.name}", Toast.LENGTH_SHORT).show()
-                        } catch (t: Throwable) {
-                            Toast.makeText(this, "切换输出失败：${t.message}", Toast.LENGTH_SHORT).show()
-                        }
-                        d.dismiss()
-                    }
-                    .setNegativeButton("取消", null)
-                    .show()
-            } catch (t: Throwable) {
-                openSystemCastSettings()
+        val fragment = androidx.mediarouter.app.MediaRouteChooserDialogFragment()
+        runCatching { fragment.show(supportFragmentManager, "cast") }
+            .onFailure { t ->
+                Toast.makeText(this, "投屏失败：${t.message ?: ""}", Toast.LENGTH_SHORT).show()
             }
-        } else {
-            openSystemCastSettings()
-        }
-    }
-
-    private fun openSystemCastSettings() {
-        AlertDialog.Builder(this)
-            .setTitle("投屏")
-            .setMessage("当前未发现可投屏的设备。\n\n请确认手机与目标设备在同一 Wi-Fi，或在系统设置中打开投屏后重试。")
-            .setPositiveButton("打开系统投屏") { d, _ ->
-                runCatching {
-                    startActivity(Intent("android.settings.CAST_SETTINGS")
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                }
-                d.dismiss()
-            }
-            .setNegativeButton("关闭", null)
-            .show()
     }
 
     /** 片头片尾设置弹窗（本剧本地保存 ds 单位秒） */

@@ -102,7 +102,7 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.3.1")
     implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
     implementation("androidx.media3:media3-ui:1.3.1")
-    implementation("androidx.media3:media3-datasource-okhttp:1.3.1")
+    implementation("androidx.mediarouter:mediarouter:1.7.0")  // 投屏（官方路由选择器）    implementation("androidx.media3:media3-datasource-okhttp:1.3.1")
 
     // 网络: OkHttp + Retrofit（catvod 模块需要 okhttp 5.x API）
     implementation("com.squareup.okhttp3:okhttp:5.4.0")

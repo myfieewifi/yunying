@@ -1114,6 +1114,65 @@ def player_menu_patches():
     }''',
                'MobilePlayer AirPlayButton interaction')
 
+    # 7) 底部控制条：选集之后插入 上一集/下一集/片头片尾（规范顺序：选集→上一集→下一集→片头片尾→…→全屏）
+    patch_text('App/MobilePlayer.swift',
+               '''                .buttonStyle(.plain)
+                .accessibilityLabel(L10n.text("Episodes"))
+            }
+            if !session.isLive {
+                Button { showsSpeedPicker = true } label: {''',
+               '''                .buttonStyle(.plain)
+                .accessibilityLabel(L10n.text("Episodes"))
+            }
+            // YunYing：上一集/下一集/片头片尾直接平铺
+            if channel.historyContext != nil {
+                let episodeBack = store.step(back: true, from: channel, session: session)
+                let episodeNext = store.step(back: false, from: channel, session: session)
+                if let back = episodeBack {
+                    Button { back.go() } label: {
+                        VStack(spacing: 3) {
+                            Image(systemName: "backward.end.fill").font(.headline)
+                            Text(L10n.text("Previous Episode")).font(.caption2).lineLimit(1).minimumScaleFactor(0.6)
+                        }
+                        .frame(width: 56, height: 44).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(back.busy)
+                    .accessibilityLabel(L10n.text("Previous Episode"))
+                }
+                if let next = episodeNext {
+                    Button { next.go() } label: {
+                        VStack(spacing: 3) {
+                            Image(systemName: "forward.end.fill").font(.headline)
+                            Text(L10n.text("Next Episode")).font(.caption2).lineLimit(1).minimumScaleFactor(0.6)
+                        }
+                        .frame(width: 56, height: 44).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(next.busy)
+                    .accessibilityLabel(L10n.text("Next Episode"))
+                }
+                Button { showsSkipIntro = true } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: "clock.arrow.circlepath").font(.headline)
+                        Text(L10n.text("Skip intro / outro")).font(.caption2).lineLimit(1).minimumScaleFactor(0.6)
+                    }
+                    .frame(width: 56, height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("player.skip")
+                .accessibilityLabel(L10n.text("Skip intro / outro"))
+            }
+            if !session.isLive {
+                Button { showsSpeedPicker = true } label: {''',
+               'MobilePlayer bottom adds prev next skip')
+
+    # 8) 进度条行只留时间（左已播/右总时长），上一集/下一集已下沉到控制条
+    patch_text('App/MobilePlayer.swift',
+               '''            SeekBar(clock: clock, moving: chromeVisible && !session.paused, hold: hold, sought: sought) { stepButtons }''',
+               '''            SeekBar(clock: clock, moving: chromeVisible && !session.paused, hold: hold, sought: sought) { } // YunYing：上一集/下一集移至底部控制条''',
+               'MobilePlayer seek bar keeps times only')
+
 
 def patch_project_yml():
     p = SRC / 'project.yml'

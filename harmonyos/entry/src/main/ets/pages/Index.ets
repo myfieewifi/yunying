@@ -5,6 +5,7 @@ import {
   ConfigStore,
   Global,
   Prefs,
+  TvBoxConfig,
   UILiveChannel,
   UILiveGroup
 } from '../model/Config';
@@ -138,7 +139,17 @@ struct Index {
     this.loading = true;
     this.homeHint = '正在加载订阅…';
     try {
-      const cfg = await ConfigStore.loadFromUrl(target);
+      let cfg: TvBoxConfig;
+      try {
+        cfg = await ConfigStore.loadFromUrl(target);
+      } catch (firstErr) {
+        // 唐三式猫影视网关：GET 根路径 404，自动尝试 {base}/config
+        if (target.endsWith('/config')) {
+          throw firstErr;
+        }
+        const alt = target.endsWith('/') ? `${target}config` : `${target}/config`;
+        cfg = await ConfigStore.loadFromUrl(alt);
+      }
       // 站点条（仅保留鸿蒙可用的 API 型站点）
       const names: string[] = [];
       const apis: string[] = [];

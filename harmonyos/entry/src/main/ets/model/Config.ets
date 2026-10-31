@@ -40,6 +40,21 @@ export interface TvBoxConfig {
   lives?: LiveGroupItem[];
 }
 
+// ---- 猫影视 CatVodSpiderios 配置结构（如 唐三 index.js GET /config）----
+
+export interface CatSiteItem {
+  key?: string;
+  name?: string;
+  api?: string;
+  type?: number;
+}
+
+export interface CatConfig {
+  video?: {
+    sites?: CatSiteItem[];
+  };
+}
+
 /** 直播页 UI 模型（避免可空字段，便于 ArkTS 状态管理） */
 export class UILiveChannel {
   name: string = '';
@@ -76,7 +91,7 @@ export class ConfigStore {
           if (resp.responseCode >= 200 && resp.responseCode < 300) {
             const text = resp.result as string;
             if (text.length > 0) {
-              return ConfigStore.parse(text);
+              return ConfigStore.parse(text, url);
             }
           }
         } catch (e) {
@@ -91,12 +106,35 @@ export class ConfigStore {
     throw new Error(`订阅下载失败 HTTP ${lastCode}（已尝试 ${agents.length} 种 UA）`);
   }
 
-  static parse(text: string): TvBoxConfig {
-    const obj = JSON.parse(text) as TvBoxConfig;
+  static parse(text: string, baseUrl: string | undefined): TvBoxConfig {
+    const obj = JSON.parse(text) as object;
     if (obj === null) {
       throw new Error('订阅内容不是有效 JSON');
     }
-    return obj;
+    // 猫影视 Cat 配置（video.sites，api 为 /spider/{key}/{type} 相对路径）
+    const cat = obj as CatConfig;
+    if (cat.video !== undefined && Array.isArray(cat.video.sites) && (obj as TvBoxConfig).sites === undefined) {
+      const out: TvBoxConfig = {};
+      const sites: SiteItem[] = [];
+      const base = (baseUrl ?? '').trim();
+      const root = base.endsWith('/') ? base.substring(0, base.length - 1) : base;
+      for (const s of cat.video.sites) {
+        const api = (s.api ?? '').trim();
+        if (api === '') {
+          continue;
+        }
+        const abs = api.startsWith('http') ? api : `${root}${api}`;
+        const item: SiteItem = {
+          key: s.key ?? '',
+          name: s.name ?? (s.key ?? '').replace(/^nodejs_/, ''),
+          api: abs
+        };
+        sites.push(item);
+      }
+      out.sites = sites;
+      return out;
+    }
+    return obj as TvBoxConfig;
   }
 
   /** 原始 urls 项可能是 "线路名$url"，取最后一段 */

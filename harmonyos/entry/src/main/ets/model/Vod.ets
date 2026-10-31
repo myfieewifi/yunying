@@ -1,15 +1,20 @@
 import http from '@ohos.net.http';
+import { BusinessError } from '@ohos.base';
 
 /**
- * 云映点播 API 客户端（ArkTS 薄客户端，纯 HTTP）：
- *   支持 TVBox 订阅里的 API 型站点（maccms JSON 接口，type 0）；
- *   jar/Python 爬虫站点（csp_xxx）在鸿蒙端无法运行，自动跳过。
- *
- * 接口约定（maccms json）：
- *   ?ac=class               → 分类
- *   ?ac=detail&t=xx&pg=n    → 分类列表（含播放地址）
- *   ?ac=detail&ids=xx       → 详情
- *   ?ac=detail&wd=xx        → 搜索
+ * 云映点播 API 客户端（ArkTS 薄客户端，纯 HTTP），支持两种协议：
+ *   1) maccms JSON 接口（type 0，GET ?ac=class/detail…）
+ *      ?ac=class               → 分类
+ *      ?ac=detail&t=xx&pg=n    → 分类列表（含播放地址）
+ *      ?ac=detail&ids=xx       → 详情
+ *      ?ac=detail&wd=xx        → 搜索
+ *   2) 猫影视 Cat 协议（type 3 POST 端点，唐三 CatVodSpiderios 网关）
+ *      POST {api}/home         → 分类+筛选
+ *      POST {api}/category     → 分类列表 {id, page}
+ *      POST {api}/detail       → 详情 {id}（vod_play_url 与 maccms 同构）
+ *      POST {api}/search       → 搜索 {wd, page}
+ *      POST {api}/play         → 播放解析 {id:<集URL>} → {url: 直链}
+ *      jar/Python 爬虫站点（csp_/py_ 前缀）在鸿蒙端无法运行，自动跳过。
  */
 
 // ---- maccms JSON 响应模型 ----
@@ -41,7 +46,13 @@ export interface RsList {
 /** 站点可解析性判定：API 型站点（不含 csp_/py_ 前缀爬虫标记） */
 export function isApiSite(api: string | undefined): boolean {
   const a = api ?? '';
-  return a.startsWith('http') && !a.startsWith('csp_');
+  return a.startsWith('http') && !a.startsWith('csp_') && !a.startsWith('py_');
+}
+
+/** Cat 协议站点判定：api 形如 http://host:9988/spider/{key}/{type} */
+export function isCatSite(api: string | undefined): boolean {
+  const a = api ?? '';
+  return a.startsWith('http') && a.includes('/spider/');
 }
 
 /** 站点 api 清洗：去掉 ;type=0 等参数段与首尾空白 */
@@ -91,6 +102,65 @@ export class UIClass {
   name: string = '';
 }
 
+// ---- 猫影视 Cat 协议（唐三 CatVodSpiderios）----
+
+/** Cat 请求体（home/category/detail/search/play 复用） */
+export interface CatBody {
+  id?: string;
+  page?: number;
+  wd?: string;
+  flag?: string;
+}
+
+/** Cat play 响应（url 直链；部分为 [名称,url,…] 交错数组） */
+export interface CatPlayRs {
+  parse?: number;
+  url?: string | string[];
+  header?: object;
+}
+
+/** Cat fastify 错误响应（如 网盘 Cookie 未配置） */
+export interface CatErrorRs {
+  message?: string;
+}
+
+/** POST JSON（Cat 协议统一请求） */
+async function postJson(url: string, body: CatBody): Promise<object> {
+  const client = http.createHttp();
+  let lastErr = '';
+  try {
+    const resp = await client.request(url, {
+      method: http.RequestMethod.POST,
+      header: { 'Content-Type': 'application/json', 'User-Agent': 'okhttp/3.12.0' },
+      extraData: JSON.stringify(body),
+      connectTimeout: 15000,
+      readTimeout: 60000,
+      expectDataType: http.HttpDataType.STRING
+    });
+    const text = resp.result as string;
+    if (resp.responseCode >= 200 && resp.responseCode < 300) {
+      return JSON.parse(text) as object;
+    }
+    // fastify 错误响应带真实原因（如 网盘 Cookie 未配置）
+    try {
+      const eo = JSON.parse(text) as CatErrorRs;
+      if (eo.message !== undefined && eo.message !== '') {
+        lastErr = eo.message;
+      } else {
+        lastErr = `HTTP ${resp.responseCode}`;
+      }
+    } catch (e) {
+      lastErr = `HTTP ${resp.responseCode}`;
+    }
+  } catch (e) {
+    const err = e as BusinessError;
+    lastErr = `${err.code}: ${err.message}`;
+  } finally {
+    client.destroy();
+  }
+  throw new Error(`${lastErr}`);
+}
+
 /** API 请求统一 UA/超时/重试 */
 async function getJson(url: string): Promise<object> {
   const agents: string[] = ['okhttp/3.12.0', 'Mozilla/5.0'];
@@ -123,10 +193,15 @@ async function getJson(url: string): Promise<object> {
 
 export class VodClient {
 
-  /** 分类列表 */
+  /** 分类列表：maccms ?ac=class / Cat POST {api}/home */
   static async classes(api: string): Promise<UIClass[]> {
-    const obj = await getJson(`${api}?ac=class`);
-    const rs = obj as RsList;
+    let rs: RsList;
+    if (isCatSite(api)) {
+      const body: CatBody = { page: 1 };
+      rs = await postJson(`${api}/home`, body) as RsList;
+    } else {
+      rs = await getJson(`${api}?ac=class`) as RsList;
+    }
     const out: UIClass[] = [];
     const items = rs.class ?? [];
     for (const c of items) {
@@ -142,22 +217,53 @@ export class VodClient {
     return out;
   }
 
-  /** 分类分页列表（ac=detail 自带播放地址，点击无需二次请求详情） */
+  /** 分类分页列表：maccms ?ac=detail / Cat POST {api}/category */
   static async list(api: string, typeId: string, page: number): Promise<RsList> {
+    if (isCatSite(api)) {
+      const body: CatBody = { id: typeId, page: page };
+      return await postJson(`${api}/category`, body) as RsList;
+    }
     const url = `${api}?ac=detail&t=${encodeURIComponent(typeId)}&pg=${page}`;
     return await getJson(url) as RsList;
   }
 
-  /** 详情 */
+  /** 详情：maccms ?ac=detail&ids= / Cat POST {api}/detail */
   static async detail(api: string, vodId: string): Promise<RsList> {
+    if (isCatSite(api)) {
+      const body: CatBody = { id: vodId };
+      return await postJson(`${api}/detail`, body) as RsList;
+    }
     const url = `${api}?ac=detail&ids=${encodeURIComponent(vodId)}`;
     return await getJson(url) as RsList;
   }
 
-  /** 搜索 */
+  /** 搜索：maccms ?ac=detail&wd= / Cat POST {api}/search */
   static async search(api: string, keyword: string): Promise<RsList> {
+    if (isCatSite(api)) {
+      const body: CatBody = { wd: keyword, page: 1 };
+      return await postJson(`${api}/search`, body) as RsList;
+    }
     const url = `${api}?ac=detail&wd=${encodeURIComponent(keyword)}`;
     return await getJson(url) as RsList;
+  }
+
+  /** Cat 播放解析：POST {api}/play {id:<集URL>} → 直链 */
+  static async resolvePlayUrl(api: string, epUrl: string): Promise<string> {
+    const body: CatBody = { id: epUrl };
+    const rs = await postJson(`${api}/play`, body) as CatPlayRs;
+    const raw = rs.url;
+    if (typeof raw === 'string' && raw !== '') {
+      return raw;
+    }
+    if (Array.isArray(raw)) {
+      // 交错数组 [名称,url,…]：取第一个 http 项
+      for (const it of raw) {
+        if (typeof it === 'string' && it.startsWith('http')) {
+          return it;
+        }
+      }
+    }
+    throw new Error('play 未返回可播地址');
   }
 
   /** RsVod → UIVod（列表卡片） */

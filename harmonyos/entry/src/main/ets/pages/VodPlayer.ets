@@ -3,7 +3,7 @@ import router from '@ohos.router';
 import { BusinessError } from '@ohos.base';
 import http from '@ohos.net.http';
 import window from '@ohos.window';
-import { PlaySession } from '../model/Vod';
+import { isCatSite, PlaySession, VodClient } from '../model/Vod';
 import { HistoryEntry, HistoryStore } from '../model/History';
 import { Global } from '../model/Config';
 
@@ -116,8 +116,22 @@ struct VodPlayer {
     }
   }
 
-  private async startPlay(url: string, resumeMs: number): Promise<void> {
+  private async startPlay(url0: string, resumeMs: number): Promise<void> {
     await this.releasePlayer();
+    let url = url0;
+    // Cat 协议站点：集 URL 是网盘/原站描述符，先经网关 /play 换真实直链
+    if (isCatSite(PlaySession.api)) {
+      this.statusText = '解析播放地址…';
+      this.buffering = true;
+      try {
+        url = await VodClient.resolvePlayUrl(PlaySession.api, url0);
+      } catch (e) {
+        const err = e as BusinessError;
+        this.buffering = false;
+        this.statusText = `解析失败：${err.message}`;
+        return;
+      }
+    }
     this.statusText = '准备中…';
     this.buffering = true;
     try {

@@ -143,8 +143,10 @@ struct Index {
       try {
         cfg = await ConfigStore.loadFromUrl(target);
       } catch (firstErr) {
-        // 唐三式猫影视网关：GET 根路径 404，自动尝试 {base}/config
-        if (target.endsWith('/config')) {
+        // 唐三式猫影视网关：GET 根路径 404，自动尝试 {base}/config。
+        // 但「不是 JSON」（如 .js/.js.md5 源码包）说明地址可达，补 /config 也无意义，直接透出提示
+        const msg = (firstErr as Error).message ?? '';
+        if (target.endsWith('/config') || msg.includes('不是有效 JSON')) {
           throw firstErr as Error;
         }
         const alt = target.endsWith('/') ? `${target}config` : `${target}/config`;

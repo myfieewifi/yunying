@@ -109,7 +109,13 @@ export class ConfigStore {
   }
 
   static parse(text: string, baseUrl: string | undefined): TvBoxConfig {
-    const obj = JSON.parse(text) as object;
+    let obj: object;
+    try {
+      obj = JSON.parse(text) as object;
+    } catch (e) {
+      // .js / .js.md5 猫影视源码包（唐三等）：内容是 JS 程序，不是 JSON 配置
+      throw new Error('订阅内容不是有效 JSON。若导入的是 .js/.js.md5 猫影视源码包（唐三类），需先在电脑/NAS 启动网关：node index.js，再填 http://电脑IP:9988');
+    }
     if (obj === null) {
       throw new Error('订阅内容不是有效 JSON');
     }

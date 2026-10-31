@@ -49,10 +49,12 @@ export interface CatSiteItem {
   type?: number;
 }
 
+export interface CatVideoSection {
+  sites?: CatSiteItem[];
+}
+
 export interface CatConfig {
-  video?: {
-    sites?: CatSiteItem[];
-  };
+  video?: CatVideoSection;
 }
 
 /** 直播页 UI 模型（避免可空字段，便于 ArkTS 状态管理） */

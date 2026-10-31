@@ -145,7 +145,7 @@ struct Index {
       } catch (firstErr) {
         // 唐三式猫影视网关：GET 根路径 404，自动尝试 {base}/config
         if (target.endsWith('/config')) {
-          throw firstErr;
+          throw firstErr as Error;
         }
         const alt = target.endsWith('/') ? `${target}config` : `${target}/config`;
         cfg = await ConfigStore.loadFromUrl(alt);

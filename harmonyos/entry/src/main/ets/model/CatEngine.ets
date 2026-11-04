@@ -313,8 +313,13 @@ export struct CatEngineView {
       .onControllerAttached(() => {
         this.controller.loadUrl($rawfile('cat/cat.html'));
       })
-      .onPageEnd(() => {
-        CatEngine.boot();
+      .onPageEnd((event) => {
+        // 只认 cat.html 的加载完成：about:blank 初始 src 的 onPageEnd 若先行触发，
+        // 会把引擎喂进即将被 loadUrl 淘汰的页面上下文（bootState=booting 早退 → 引擎锁死）
+        const u = event ? (event.url ?? '') : '';
+        if (u.indexOf('cat.html') >= 0) {
+          CatEngine.boot();
+        }
       })
   }
 }

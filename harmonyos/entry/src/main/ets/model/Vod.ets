@@ -1,20 +1,21 @@
 import http from '@ohos.net.http';
 import { BusinessError } from '@ohos.base';
+import { CatEngine } from './CatEngine';
 
 /**
- * 云映点播 API 客户端（ArkTS 薄客户端，纯 HTTP），支持两种协议：
+ * 云映点播 API 客户端（ArkTS 薄客户端），支持两种协议：
  *   1) maccms JSON 接口（type 0，GET ?ac=class/detail…）
  *      ?ac=class               → 分类
  *      ?ac=detail&t=xx&pg=n    → 分类列表（含播放地址）
  *      ?ac=detail&ids=xx       → 详情
  *      ?ac=detail&wd=xx        → 搜索
- *   2) 猫影视 Cat 协议（type 3 POST 端点，唐三 CatVodSpiderios 网关）
+ *   2) 猫影视 Cat 协议（type 3 POST，内嵌引擎：ArkWeb 沙盒跑唐三 CatVodSpider bundle）
  *      POST {api}/home         → 分类+筛选
  *      POST {api}/category     → 分类列表 {id, page}
  *      POST {api}/detail       → 详情 {id}（vod_play_url 与 maccms 同构）
  *      POST {api}/search       → 搜索 {wd, page}
  *      POST {api}/play         → 播放解析 {id:<集URL>} → {url: 直链}
- *      jar/Python 爬虫站点（csp_/py_ 前缀）在鸿蒙端无法运行，自动跳过。
+ *      api 为 /spider/{key}/{type} 相对路径（引擎 /config 下发）或历史绝对 URL（自动截路径）。
  */
 
 // ---- maccms JSON 响应模型 ----
@@ -49,10 +50,10 @@ export function isApiSite(api: string | undefined): boolean {
   return a.startsWith('http') && !a.startsWith('csp_') && !a.startsWith('py_');
 }
 
-/** Cat 协议站点判定：api 形如 http://host:9988/spider/{key}/{type} */
+/** Cat 协议站点判定：api 含 /spider/ 路径段（内嵌引擎相对路径 /spider/{key}/{type} 或历史绝对 URL） */
 export function isCatSite(api: string | undefined): boolean {
   const a = api ?? '';
-  return a.startsWith('http') && a.includes('/spider/');
+  return a.includes('/spider/');
 }
 
 /** 站点 api 清洗：去掉 ;type=0 等参数段与首尾空白 */
@@ -112,7 +113,7 @@ export interface CatBody {
   flag?: string;
 }
 
-/** Cat play 响应（url 直链；部分为 [名称,url,…] 交错数组） */
+/** Cat play 响应（url 直链；部分为 [名称,url,…] 交错数组；header 为请求头 dict） */
 export interface CatPlayRs {
   parse?: number;
   url?: string | string[];
@@ -124,39 +125,22 @@ export interface CatErrorRs {
   message?: string;
 }
 
-/** POST JSON（Cat 协议统一请求） */
-async function postJson(url: string, body: CatBody): Promise<object> {
-  const client = http.createHttp();
-  let lastErr = '';
+/** Cat 协议统一请求：POST 注入内嵌引擎沙盒（fake server） */
+async function postJson(target: string, body: CatBody): Promise<object> {
+  const path = target.indexOf('/spider/') >= 0 ? target.substring(target.indexOf('/spider/')) : target;
+  const r = await CatEngine.catRequest('POST', path, JSON.stringify(body));
+  if (r.status >= 200 && r.status < 300) {
+    return JSON.parse(r.body) as object;
+  }
+  let lastErr = `HTTP ${r.status}`;
+  // fastify 错误响应带真实原因（如 网盘 Cookie 未配置）
   try {
-    const resp = await client.request(url, {
-      method: http.RequestMethod.POST,
-      header: { 'Content-Type': 'application/json', 'User-Agent': 'okhttp/3.12.0' },
-      extraData: JSON.stringify(body),
-      connectTimeout: 15000,
-      readTimeout: 60000,
-      expectDataType: http.HttpDataType.STRING
-    });
-    const text = resp.result as string;
-    if (resp.responseCode >= 200 && resp.responseCode < 300) {
-      return JSON.parse(text) as object;
-    }
-    // fastify 错误响应带真实原因（如 网盘 Cookie 未配置）
-    try {
-      const eo = JSON.parse(text) as CatErrorRs;
-      if (eo.message !== undefined && eo.message !== '') {
-        lastErr = eo.message;
-      } else {
-        lastErr = `HTTP ${resp.responseCode}`;
-      }
-    } catch (e) {
-      lastErr = `HTTP ${resp.responseCode}`;
+    const eo = JSON.parse(r.body) as CatErrorRs;
+    if (eo.message !== undefined && eo.message !== '') {
+      lastErr = eo.message;
     }
   } catch (e) {
-    const err = e as BusinessError;
-    lastErr = `${err.code}: ${err.message}`;
-  } finally {
-    client.destroy();
+    // 保留 HTTP 状态码
   }
   throw new Error(`${lastErr}`);
 }

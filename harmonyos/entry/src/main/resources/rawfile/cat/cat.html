@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>cat</title>
+<script>
+window.__catChunks = [];
+window.__catFeed = function (c) { window.__catChunks.push(String(c)); };
+window.__catBoot = function () {
+  var src = window.__catChunks.join('');
+  window.__catChunks = [];
+  (0, eval)(src);
+  return 'booted';
+};
+</script>
+</head>
+<body>CAT</body>
+</html>

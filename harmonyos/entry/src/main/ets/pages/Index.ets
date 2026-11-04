@@ -2,6 +2,7 @@ import media from '@ohos.multimedia.media';
 import router from '@ohos.router';
 import { BusinessError } from '@ohos.base';
 import {
+  CatConfig,
   ConfigStore,
   Global,
   Prefs,
@@ -9,6 +10,7 @@ import {
   UILiveChannel,
   UILiveGroup
 } from '../model/Config';
+import { CatEngine, CatEngineView } from '../model/CatEngine';
 import {
   cleanApi,
   PlaySession,
@@ -143,10 +145,14 @@ struct Index {
       try {
         cfg = await ConfigStore.loadFromUrl(target);
       } catch (firstErr) {
-        // 唐三式猫影视网关：GET 根路径 404，自动尝试 {base}/config。
-        // 但「不是 JSON」（如 .js/.js.md5 源码包）说明地址可达，补 /config 也无意义，直接透出提示
         const msg = (firstErr as Error).message ?? '';
-        if (target.endsWith('/config') || msg.includes('不是有效 JSON')) {
+        if (msg.includes('不是有效 JSON')) {
+          // 猫影视 Cat 源码包（唐三类 .js/.js.md5）：不再要求外部网关，内嵌引擎直接供站
+          await this.applyEngineSites();
+          return;
+        }
+        // 唐三式猫影视网关：GET 根路径 404，自动尝试 {base}/config
+        if (target.endsWith('/config')) {
           throw firstErr as Error;
         }
         const alt = target.endsWith('/') ? `${target}config` : `${target}/config`;
@@ -217,6 +223,43 @@ struct Index {
       const err = e as BusinessError;
       this.loading = false;
       this.homeHint = `加载失败：${err.message}`;
+    }
+  }
+
+  /** 内嵌引擎供站（唐三 .js 源码包订阅场景）：等引擎就绪 → GET /config → 站点列表 → 默认站点 */
+  private async applyEngineSites(): Promise<void> {
+    await CatEngine.waitReady();
+    const r = await CatEngine.catRequest('GET', '/config', '');
+    if (r.status < 200 || r.status >= 300) {
+      throw new Error(`引擎 /config HTTP ${r.status}`);
+    }
+    const cfg = JSON.parse(r.body) as CatConfig;
+    const sites = cfg.video?.sites ?? [];
+    const names: string[] = [];
+    const apis: string[] = [];
+    for (const s of sites) {
+      const api = (s.api ?? '').trim();
+      if (api === '') {
+        continue;
+      }
+      const n = s.name ?? (s.key ?? '').replace(/^nodejs_/, '');
+      names.push(n);
+      apis.push(api);
+    }
+    this.siteNames = names;
+    this.siteApis = apis;
+    this.currentSiteIndex = 0;
+    this.liveGroups = [];
+    this.currentGroupIndex = 0;
+    this.loading = false;
+    this.homeHint = `已加载：${names.length} 个内嵌引擎站点 / 0 个频道组`;
+    const ctx = Global.context;
+    if (ctx !== null) {
+      await Prefs.putString(ctx, 'config_url', this.configUrl);
+    }
+    this.refreshHistory();
+    if (names.length > 0) {
+      await this.openSite(0);
     }
   }
 
@@ -548,6 +591,9 @@ struct Index {
 
   build() {
     Stack() {
+      // A 轨内嵌 Cat 引擎（1px 隐藏 ArkWeb 沙盒，跑唐三 bundle）
+      CatEngineView()
+
       Tabs({
         barPosition: BarPosition.End,
         controller: this.tabController

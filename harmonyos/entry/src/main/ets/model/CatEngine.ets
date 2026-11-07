@@ -156,16 +156,24 @@ export class CatEngine {
     CatEngine.publishState();
   }
 
-  /** 等引擎就绪（booting 中阻塞等待；error/idle 立即抛） */
+  /** 等引擎就绪（booting/idle 阻塞等待最长 5 分钟；error 立即抛）。
+   * 5 分钟下限依据：boot 自身预算 = 喂入 ~100 次 IPC + eval 7MB（真机 10-30s）
+   * + fake server 等待 60s，真机低端机可超 60s，waitReady 必须比它更长 */
   static async waitReady(): Promise<void> {
     let guard = 0;
-    while ((CatEngine.bootState === 'booting' || CatEngine.bootState === 'idle') && guard < 240) {
+    while ((CatEngine.bootState === 'booting' || CatEngine.bootState === 'idle') && guard < 1200) {
       await CatEngine.sleep(250);
       guard++;
+      // idle=Web 壳尚未开喂（boot 阶段有自己的进度上屏，别抢同一个调试位）
+      if (CatEngine.bootState === 'idle' && guard % 16 === 0) {
+        CatEngine.publishDebug(`引擎：等待 Web 壳挂载 ${Math.round(guard / 4)}s/300s`);
+      }
     }
     if (CatEngine.bootState !== 'ready') {
       let m = `Cat 引擎未就绪（${CatEngine.bootState}）`;
-      if (CatEngine.errMsg !== '') {
+      if (CatEngine.bootState === 'booting') {
+        m += '：引擎仍在启动中，请稍候重试';
+      } else if (CatEngine.errMsg !== '') {
         m += `：${CatEngine.errMsg}`;
       }
       throw new Error(m);

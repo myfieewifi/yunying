@@ -54,6 +54,9 @@ export class CatEngine {
   static errMsg: string = '';
   static injectSeq: number = 0;
   static pendingInject: Map<string, PendingInject> = new Map();
+  /** idle 恢复：重发 cat.html 加载（$rawfile 仅 UI 上下文可用，CatEngineView 挂载时注入闭包） */
+  static retryLoad: (() => void) | null = null;
+  static retryCount: number = 0;
 
   /** 引擎是否支持站点（isCatSite 判定后调用） */
   static isReady(): boolean {
@@ -160,13 +163,26 @@ export class CatEngine {
    * 5 分钟下限依据：boot 自身预算 = 喂入 ~100 次 IPC + eval 7MB（真机 10-30s）
    * + fake server 等待 60s，真机低端机可超 60s，waitReady 必须比它更长 */
   static async waitReady(): Promise<void> {
+    CatEngine.retryCount = 0;
     let guard = 0;
     while ((CatEngine.bootState === 'booting' || CatEngine.bootState === 'idle') && guard < 1200) {
       await CatEngine.sleep(250);
       guard++;
-      // idle=Web 壳尚未开喂（boot 阶段有自己的进度上屏，别抢同一个调试位）
-      if (CatEngine.bootState === 'idle' && guard % 16 === 0) {
-        CatEngine.publishDebug(`引擎：等待 Web 壳挂载 ${Math.round(guard / 4)}s/300s`);
+      if (CatEngine.bootState === 'idle') {
+        // idle=boot 从未启动（onPageEnd 未触发）：显示接线状态区分"控制器没挂"和"页面没加载"
+        if (guard % 16 === 0) {
+          const wired = CatEngine.controller !== null;
+          CatEngine.publishDebug(`引擎：等待 Web 壳挂载 ${Math.round(guard / 4)}s/300s（controller=${wired ? '已挂载' : '未挂载'}）`);
+        }
+        // 恢复路径：控制器已挂载但页面 20/40/60s 仍未加载完成 → 重发 loadUrl
+        if (CatEngine.controller !== null && CatEngine.retryLoad !== null
+          && guard % 80 === 0 && guard <= 240) {
+          CatEngine.retryCount++;
+          if (CatEngine.retryCount <= 3) {
+            CatEngine.publishDebug(`引擎：页面 ${Math.round(guard / 4)}s 未就绪，重试加载（第 ${CatEngine.retryCount} 次）`);
+            CatEngine.retryLoad();
+          }
+        }
       }
     }
     if (CatEngine.bootState !== 'ready') {
@@ -353,15 +369,39 @@ export struct CatEngineView {
       .onControllerAttached(() => {
         // 接线：run()/runJavaScript 全走这个静态引用（漏赋值会让引擎壳永远"未挂载"）
         CatEngine.controller = this.controller;
-        this.controller.loadUrl($rawfile('cat/cat.html'));
+        // 供 waitReady 的 idle 恢复路径重发加载（$rawfile 仅 UI 上下文可用，闭包存在视图里）
+        CatEngine.retryLoad = () => {
+          try {
+            this.controller.loadUrl($rawfile('cat/cat.html'));
+          } catch (e) {
+            CatEngine.publishDebug(`Web 壳：重试 loadUrl 抛错 ${(e as Error).message}`);
+          }
+        };
+        CatEngine.publishDebug('Web 壳：控制器已挂载，加载 cat.html');
+        try {
+          this.controller.loadUrl($rawfile('cat/cat.html'));
+        } catch (e) {
+          CatEngine.publishDebug(`Web 壳：loadUrl 抛错 ${(e as Error).message}`);
+        }
+      })
+      .onPageBegin((event) => {
+        const u = event ? (event.url ?? '') : '';
+        CatEngine.publishDebug(`Web 壳：开始加载 ${u.substring(0, 60)}`);
       })
       .onPageEnd((event) => {
         // 只认 cat.html 的加载完成：about:blank 初始 src 的 onPageEnd 若先行触发，
         // 会把引擎喂进即将被 loadUrl 淘汰的页面上下文（bootState=booting 早退 → 引擎锁死）
         const u = event ? (event.url ?? '') : '';
+        CatEngine.publishDebug(`Web 壳：加载完成 ${u.substring(0, 60)}`);
         if (u.indexOf('cat.html') >= 0) {
           CatEngine.boot();
         }
+      })
+      .onErrorReceive((event) => {
+        // 主框架/资源加载失败（文件缺失、找不到页面等）：区分"事件没触发"和"加载失败"
+        const u = event && event.request ? event.request.getRequestUrl() : '';
+        const msg = event && event.error ? event.error.getErrorInfo() : '';
+        CatEngine.publishDebug(`Web 壳：加载错误 ${u.substring(0, 60)} ${msg}`);
       })
   }
 }

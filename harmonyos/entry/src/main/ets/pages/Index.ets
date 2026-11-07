@@ -57,6 +57,7 @@ struct Index {
   @State siteApis: string[] = [];
   @State currentSiteIndex: number = 0;
   @State loading: boolean = false;
+@StorageLink('catEngineDebug') catDebug: string = '';
   @State homeHint: string = '导入 TVBox 订阅，开启追剧之旅';
 
   // ---- 点播：分类/列表/分页 ----
@@ -813,7 +814,9 @@ struct Index {
           if (!this.searchActive && this.homeHint !== '' && this.vods.length === 0
             && !this.vodLoading && this.classList.length === 0) {
             Column() {
-              Text(this.loading ? '加载中…' : this.homeHint)
+              Text(this.loading
+                ? (this.catDebug !== '' ? `加载中… ${this.catDebug}` : '加载中…')
+                : this.homeHint)
                 .fontSize(14)
                 .fontColor(this.homeHint.startsWith('加载失败') ? COLOR_GOLD : COLOR_TEXT_SUB)
                 .textAlign(TextAlign.Center)

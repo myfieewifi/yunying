@@ -41,8 +41,11 @@ class PendingInject {
   reject: (e: Error) => void = (_e: Error) => { };
 }
 
-/** 喂入分块大小（字符）：256KB，平衡 runJavaScript IPC 开销与调用次数 */
-const FEED_CHUNK: number = 256 * 1024;
+/** 喂入分块大小（字符）：64KB——runJavaScript 大脚本 IPC 在部分真机上有长度上限，
+ * 64KB 远低于已知阈值；bundle 6.4MB 约 100 次 IPC，真机实测 1-5s 可接受 */
+const FEED_CHUNK: number = 64 * 1024;
+/** 注入请求超时（ms）：fake server 挂起/桥丢失时兜底，防"加载中"永挂 */
+const INJECT_TIMEOUT: number = 90000;
 
 export class CatEngine {
   static controller: webview.WebviewController | null = null;
@@ -59,6 +62,12 @@ export class CatEngine {
 
   static publishState(): void {
     AppStorage.setOrCreate<string>('catEngineState', CatEngine.bootState);
+  }
+
+  /** 引擎进度/日志上屏（homeHint 可引用；只留最后一行，防内存增长） */
+  static publishDebug(line: string): void {
+    const s = line.length > 160 ? line.substring(0, 160) : line;
+    AppStorage.setOrCreate<string>('catEngineDebug', s);
   }
 
   static sleep(ms: number): Promise<void> {
@@ -83,6 +92,8 @@ export class CatEngine {
     const raw = await rm.getRawFileContent(`cat/${name}`);
     const dec = util.TextDecoder.create('utf-8');
     const src = dec.decodeToString(raw);
+    const total = Math.ceil(src.length / FEED_CHUNK);
+    CatEngine.publishDebug(`喂入 ${name} 0/${total}`);
     for (let i = 0; i < src.length; i += FEED_CHUNK) {
       let end = Math.min(i + FEED_CHUNK, src.length);
       if (end < src.length) {
@@ -94,6 +105,7 @@ export class CatEngine {
       }
       const chunk = src.substring(i, end);
       await CatEngine.run(`__catFeed(${JSON.stringify(chunk)})`);
+      CatEngine.publishDebug(`喂入 ${name} ${Math.round(i / FEED_CHUNK) + 1}/${total}`);
     }
   }
 
@@ -111,9 +123,11 @@ export class CatEngine {
         throw new Error('无全局上下文');
       }
       const rm = ctx.resourceManager;
+      CatEngine.publishDebug('引擎：读取内置源码');
       await CatEngine.feed(rm, 'catboot.js');
       await CatEngine.feed(rm, 'bundle.js');
       // cat.html 的 __catBoot：(0,eval) 拼接源 —— catboot IIFE 铺全局面，bundle 顶层执行并暴露 __catStart
+      CatEngine.publishDebug('引擎：eval 启动（真机 10-30s 正常）');
       await CatEngine.run('__catBoot()');
       await CatEngine.run('typeof __catStart === "function" ? __catStart() : 0');
       let ok = false;
@@ -123,16 +137,21 @@ export class CatEngine {
           ok = true;
           break;
         }
+        if (i % 8 === 0) {
+          CatEngine.publishDebug(`引擎：等待 fake server 就绪 ${Math.round(i * 0.25)}s/60s`);
+        }
         await CatEngine.sleep(250);
       }
       if (!ok) {
         throw new Error('引擎启动超时（60s）');
       }
+      CatEngine.publishDebug('引擎：就绪');
       CatEngine.bootState = 'ready';
     } catch (e) {
       CatEngine.bootState = 'error';
       const err = e as BusinessError;
       CatEngine.errMsg = err.message ?? '未知错误';
+      CatEngine.publishDebug(`引擎启动失败：${CatEngine.errMsg}`);
     }
     CatEngine.publishState();
   }
@@ -171,14 +190,26 @@ export class CatEngine {
       pi.resolve = resolve;
       pi.reject = reject;
     });
+    const timer = setTimeout(() => {
+      // 沙盒挂起/桥丢失兜底：防"加载中"永挂
+      if (CatEngine.pendingInject.delete(id)) {
+        CatEngine.publishDebug(`注入超时 ${id}: ${path}`);
+        pi.reject(new Error(`引擎注入超时（${Math.round(INJECT_TIMEOUT / 1000)}s）：${path}`));
+      }
+    }, INJECT_TIMEOUT);
     CatEngine.pendingInject.set(id, pi);
     try {
       await CatEngine.run(`__catInject(${JSON.stringify(id)},${JSON.stringify(method)},${JSON.stringify(path)},${JSON.stringify(bodyJson)})`);
     } catch (e) {
+      clearTimeout(timer);
       CatEngine.pendingInject.delete(id);
       throw e as Error;
     }
-    return await done;
+    try {
+      return await done;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /** fetch 桥回调（catHost.fetchBridge → 此处）：ArkTS http 出站，结果回注沙盒 */
@@ -288,6 +319,7 @@ export class CatHostBridge {
 
   log(s: string): void {
     console.info(`[cat-host] ${s}`);
+    CatEngine.publishDebug(`JS: ${s}`);
   }
 }
 
@@ -311,6 +343,8 @@ export struct CatEngineView {
         controller: this.controller
       })
       .onControllerAttached(() => {
+        // 接线：run()/runJavaScript 全走这个静态引用（漏赋值会让引擎壳永远"未挂载"）
+        CatEngine.controller = this.controller;
         this.controller.loadUrl($rawfile('cat/cat.html'));
       })
       .onPageEnd((event) => {

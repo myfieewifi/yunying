@@ -1,5 +1,6 @@
 import http from '@ohos.net.http';
 import { BusinessError } from '@ohos.base';
+import { ConfigStore, DownloadResult } from './Config';
 import { CatEngine } from './CatEngine';
 
 /**
@@ -145,7 +146,7 @@ async function postJson(target: string, body: CatBody): Promise<object> {
   throw new Error(`${lastErr}`);
 }
 
-/** API 请求统一 UA/超时/重试 */
+/** API 请求统一 UA/超时/重试（3xx 重定向在 ConfigStore.fetchText 内手动跟随） */
 async function getJson(url: string): Promise<object> {
   const agents: string[] = ['okhttp/3.12.0', 'Mozilla/5.0'];
   const client = http.createHttp();
@@ -153,17 +154,11 @@ async function getJson(url: string): Promise<object> {
   try {
     for (const ua of agents) {
       try {
-        const resp = await client.request(url, {
-          method: http.RequestMethod.GET,
-          header: { 'User-Agent': ua },
-          connectTimeout: 15000,
-          readTimeout: 20000,
-          expectDataType: http.HttpDataType.STRING
-        });
-        if (resp.responseCode >= 200 && resp.responseCode < 300) {
-          const text = resp.result as string;
-          return JSON.parse(text) as object;
+        const dr = await ConfigStore.fetchText(client, url, ua);
+        if (dr.text !== '') {
+          return JSON.parse(dr.text) as object;
         }
+        lastErr = `HTTP ${dr.code}`;
       } catch (e) {
         const err = e as BusinessError;
         lastErr = `${err.code}: ${err.message}`;

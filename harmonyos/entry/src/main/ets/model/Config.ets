@@ -68,9 +68,16 @@ export class UILiveGroup {
   channels: UILiveChannel[] = [];
 }
 
+/** 下载结果载体（ArkTS 不用内联对象字面量） */
+export class DownloadResult {
+  code: number = 0;
+  text: string = '';
+}
+
 /**
  * 订阅配置加载器：
  *   - UA 依次回退（摸鱼儿等订阅站按 UA 拦截，okhttp/3.12.0 优先，与安卓端一致）
+ *   - 3xx 手动跟随重定向（ArkTS http 不自动跟随）
  *   - JSON.parse 后按 TvBoxConfig 结构取值
  */
 export class ConfigStore {
@@ -81,26 +88,23 @@ export class ConfigStore {
     let lastCode = 0;
     try {
       for (const ua of agents) {
+        let dr: DownloadResult;
         try {
-          const resp = await client.request(url, {
-            method: http.RequestMethod.GET,
-            header: { 'User-Agent': ua },
-            connectTimeout: 15000,
-            readTimeout: 15000,
-            expectDataType: http.HttpDataType.STRING
-          });
-          lastCode = resp.responseCode;
-          if (resp.responseCode >= 200 && resp.responseCode < 300) {
-            const text = resp.result as string;
-            if (text.length > 0) {
-              return ConfigStore.parse(text, url);
-            }
-          }
+          dr = await ConfigStore.fetchText(client, url, ua);
         } catch (e) {
-          // 换下一个 UA 重试
+          // 网络层失败：换下一个 UA 重试
           const err = e as BusinessError;
           lastCode = err.code;
+          continue;
         }
+        lastCode = dr.code;
+        if (dr.text === '') {
+          // 非 2xx（重定向耗尽/404 等）：换下一个 UA
+          continue;
+        }
+        // 内容层（parse）错误直接传播——与 UA 无关，重试无意义；
+        // "不是有效 JSON" 由 Index 侧接住转内嵌引擎
+        return ConfigStore.parse(dr.text, url);
       }
     } finally {
       client.destroy();
@@ -108,13 +112,94 @@ export class ConfigStore {
     throw new Error(`订阅下载失败 HTTP ${lastCode}（已尝试 ${agents.length} 种 UA）`);
   }
 
+  /** 单 UA 下载：手动跟随 3xx 重定向（ArkTS http 不自动跟随，kstore 等存储站 http→https 301 常见）。
+   *  返回最后响应码与 2xx 响应体；非 2xx / 重定向耗尽 text 为空串；网络异常抛出。订阅与站点 API 共用。 */
+  static async fetchText(client: http.HttpRequest, url: string, ua: string): Promise<DownloadResult> {
+    const out = new DownloadResult();
+    let current = url;
+    for (let hops = 0; hops < 5; hops++) {
+      const resp = await client.request(current, {
+        method: http.RequestMethod.GET,
+        header: { 'User-Agent': ua },
+        connectTimeout: 15000,
+        readTimeout: 15000,
+        expectDataType: http.HttpDataType.STRING
+      });
+      const code = resp.responseCode;
+      out.code = code;
+      if (code >= 300 && code < 400) {
+        const loc = ConfigStore.headerValue(resp.header, 'location');
+        if (loc === '') {
+          break;
+        }
+        current = ConfigStore.resolveRedirect(current, loc);
+        continue;
+      }
+      if (code >= 200 && code < 300) {
+        const text = resp.result as string;
+        if (text.length > 0) {
+          out.text = text;
+        }
+      }
+      break;
+    }
+    return out;
+  }
+
+  /** 响应头大小写不敏感取值（Location 可能是数组形态） */
+  private static headerValue(h: object, name: string): string {
+    try {
+      const rec = h as Record<string, Object>;
+      const keys = Object.keys(rec);
+      for (let i = 0; i < keys.length; i++) {
+        if (keys[i].toLowerCase() !== name) {
+          continue;
+        }
+        const v = rec[keys[i]];
+        if (typeof v === 'string') {
+          return v as string;
+        }
+        if (typeof v === 'number') {
+          return String(v);
+        }
+        if (Array.isArray(v)) {
+          const arr = v as Array<Object>;
+          return arr.length > 0 ? String(arr[0]) : '';
+        }
+      }
+    } catch (e) {
+      // 头解析失败按缺失处理
+    }
+    return '';
+  }
+
+  /** 相对 Location 解析为绝对 URL（含换协议/换站点跳转） */
+  private static resolveRedirect(base: string, loc: string): string {
+    const l = loc.trim();
+    if (l.startsWith('http://') || l.startsWith('https://')) {
+      return l;
+    }
+    const i = base.indexOf('://');
+    if (i < 0) {
+      return l;
+    }
+    const schemeEnd = i + 3;
+    const slash = base.indexOf('/', schemeEnd);
+    const origin = slash < 0 ? base : base.substring(0, slash);
+    if (l.startsWith('/')) {
+      return origin + l;
+    }
+    const dir = slash < 0 ? base + '/' : base.substring(0, base.lastIndexOf('/') + 1);
+    return dir + l;
+  }
+
   static parse(text: string, baseUrl: string | undefined): TvBoxConfig {
     let obj: object;
     try {
       obj = JSON.parse(text) as object;
     } catch (e) {
-      // .js / .js.md5 猫影视源码包（唐三等）：内容是 JS 程序，不是 JSON 配置
-      throw new Error('订阅内容不是有效 JSON。若导入的是 .js/.js.md5 猫影视源码包（唐三类），需先在电脑/NAS 启动网关：node index.js，再填 http://电脑IP:9988');
+      // .js / .js.md5 猫影视源码包（唐三等）：内容是 JS 程序/校验串，不是 JSON 配置——Index 侧接住后转内嵌引擎
+      throw new Error('订阅内容不是有效 JSON（.js/.md5 猫影视源码包将转内嵌引擎处理）');
     }
     if (obj === null) {
       throw new Error('订阅内容不是有效 JSON');

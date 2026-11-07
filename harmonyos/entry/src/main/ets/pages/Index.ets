@@ -146,8 +146,10 @@ struct Index {
         cfg = await ConfigStore.loadFromUrl(target);
       } catch (firstErr) {
         const msg = (firstErr as Error).message ?? '';
-        if (msg.includes('不是有效 JSON')) {
-          // 猫影视 Cat 源码包（唐三类 .js/.js.md5）：不再要求外部网关，内嵌引擎直接供站
+        const tl = target.trim().toLowerCase();
+        // 猫影视 Cat 源码包（唐三类 .js/.js.md5/.md5）：内容非 JSON 或 URL 形态即命中——
+        // 引擎为打包内置，源站失效/防盗链拒外也照常供站
+        if (msg.includes('不是有效 JSON') || tl.endsWith('.js') || tl.endsWith('.js.md5') || tl.endsWith('.md5')) {
           await this.applyEngineSites();
           return;
         }
